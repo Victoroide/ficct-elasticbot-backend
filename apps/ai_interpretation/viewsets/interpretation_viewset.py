@@ -123,6 +123,16 @@ class InterpretationViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Verify elasticity coefficient exists
+        if calculation.elasticity_coefficient is None:
+            return Response(
+                {
+                    'error': 'Calculation has no result',
+                    'detail': 'Elasticity coefficient is null. The calculation may have failed.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         # Check cache first
         context = {
             'method': calculation.method,
