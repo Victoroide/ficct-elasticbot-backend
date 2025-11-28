@@ -1,0 +1,99 @@
+# ==============================================================================
+# ElasticBot Backend - Docker Ignore File
+# ==============================================================================
+# Excludes unnecessary files from Docker build context to optimize build speed
+# and reduce image size.
+# ==============================================================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info
+dist
+build
+eggs
+parts
+var
+sdist
+develop-eggs
+.installed.cfg
+lib
+lib64
+.eggs
+
+# Virtual environments
+.venv
+venv
+ENV
+env
+
+# IDE and editors
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.nox
+coverage.xml
+*.cover
+.hypothesis
+
+# Documentation
+docs/_build
+*.md
+!README.md
+
+# Local environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs
+logs
+*.log
+
+# Static and media (will be generated)
+staticfiles
+media
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+Jenkinsfile
+
+# Misc
+*.bak
+*.tmp
+*.temp
+node_modules
+npm-debug.log

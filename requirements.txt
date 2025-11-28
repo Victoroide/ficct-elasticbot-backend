@@ -1,0 +1,61 @@
+Django
+djangorestframework
+drf-spectacular
+django-cors-headers
+django-environ
+django-ratelimit
+django-celery-beat
+django-celery-results
+
+# Database
+psycopg2-binary
+dj-database-url==2.1.0
+
+# Celery & Redis
+celery==5.3.6
+redis==4.6.0
+hiredis==2.3.2
+
+# AWS Services
+boto3==1.34.34
+botocore==1.34.34
+
+# Data Processing & Statistics
+numpy==1.26.3
+pandas==2.1.4
+scikit-learn==1.4.0
+statsmodels==0.14.1
+scipy==1.11.4
+
+# HTTP & API
+requests==2.31.0
+httpx==0.26.0
+beautifulsoup4==4.12.3
+lxml==5.1.0
+
+# PDF Generation
+reportlab==4.0.9
+weasyprint==60.2
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2024.1
+structlog==24.1.0
+python-json-logger==2.0.7
+
+# Development & Testing
+pytest==7.4.4
+pytest-django==4.7.0
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+factory-boy==3.3.0
+faker==22.0.0
+flake8==7.0.0
+black==24.1.1
+
+# Production Server
+gunicorn==21.2.0
+whitenoise==6.6.0
+
+# Monitoring
+flower==2.0.1

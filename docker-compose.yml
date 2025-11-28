@@ -1,0 +1,146 @@
+# ==============================================================================
+# ElasticBot Backend - Docker Compose Configuration
+# ==============================================================================
+# Three-container architecture: web, worker, beat
+# Includes Redis for caching/broker and optional PostgreSQL
+# ==============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Web Service - Django REST API with Gunicorn
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elasticbot-web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DEBUG=False
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ALLOWED_HOSTS=localhost,127.0.0.1,elasticbot-web
+      - CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+      - logs_volume:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - elasticbot-network
+
+  # ---------------------------------------------------------------------------
+  # Worker Service - Celery Worker for async tasks
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elasticbot-worker
+    restart: unless-stopped
+    command: celery -A base worker -l info --concurrency=2
+    env_file:
+      - .env
+    environment:
+      - DEBUG=False
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - logs_volume:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "celery"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - elasticbot-network
+
+  # ---------------------------------------------------------------------------
+  # Beat Service - Celery Beat for scheduled tasks
+  # ---------------------------------------------------------------------------
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elasticbot-beat
+    restart: unless-stopped
+    command: celery -A base beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    env_file:
+      - .env
+    environment:
+      - DEBUG=False
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - logs_volume:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "celery"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - elasticbot-network
+
+  # ---------------------------------------------------------------------------
+  # Redis Service - Cache and Celery Broker
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: elasticbot-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - elasticbot-network
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  elasticbot-network:
+    driver: bridge
+
+# ==============================================================================
+# Volumes
+# ==============================================================================
+volumes:
+  static_volume:
+  media_volume:
+  logs_volume:
+  redis_data:

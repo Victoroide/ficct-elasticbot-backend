@@ -1,0 +1,57 @@
+# ==============================================================================
+# ElasticBot Backend - Docker Compose Override (Development)
+# ==============================================================================
+# Automatically loaded with docker-compose.yml for local development.
+# Adds hot reload, debug mode, and exposed ports for debugging.
+# ==============================================================================
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      - DEBUG=True
+    volumes:
+      # Mount source code for hot reload
+      - .:/app:cached
+      - /app/.venv  # Exclude venv from mount
+    ports:
+      - "8000:8000"
+
+  worker:
+    command: celery -A base worker -l debug --concurrency=1
+    environment:
+      - DEBUG=True
+    volumes:
+      - .:/app:cached
+      - /app/.venv
+
+  beat:
+    command: celery -A base beat -l debug --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment:
+      - DEBUG=True
+    volumes:
+      - .:/app:cached
+      - /app/.venv
+
+  # Flower for Celery monitoring (development only)
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elasticbot-flower
+    command: celery -A base flower --port=5555
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    environment:
+      - DEBUG=True
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - worker
+    networks:
+      - elasticbot-network
