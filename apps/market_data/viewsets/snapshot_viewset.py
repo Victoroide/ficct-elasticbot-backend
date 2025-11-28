@@ -10,8 +10,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiExample
-from apps.market_data.models import MarketSnapshot
-from apps.market_data.serializers import MarketSnapshotSerializer
+from apps.market_data.models import MarketSnapshot, MacroeconomicIndicator
+from apps.market_data.serializers import MarketSnapshotSerializer, MacroeconomicIndicatorSerializer
 
 
 @extend_schema_view(
@@ -106,4 +106,58 @@ class SnapshotViewSet(viewsets.ReadOnlyModelViewSet):
             }, status=404)
 
         serializer = self.get_serializer(snapshot)
+        return Response(serializer.data)
+
+    @extend_schema(
+        tags=['Market Data'],
+        summary='Get latest BCB indicator',
+        description='Retrieve the most recent macroeconomic indicator with official '
+                    'BCB exchange rate. Returns the latest record with non-null '
+                    'official_exchange_rate.',
+        responses={
+            200: MacroeconomicIndicatorSerializer,
+            404: {'description': 'No indicators available'},
+        },
+        examples=[
+            OpenApiExample(
+                'Successful Response',
+                value={
+                    'id': 1,
+                    'date': '2025-11-27',
+                    'official_exchange_rate': '6.96',
+                    'monthly_inflation_rate': None,
+                    'accumulated_inflation': None,
+                    'source': 'BCB',
+                    'raw_data': {
+                        'venta': '6.96',
+                        'compra': '6.86',
+                        'url': 'https://www.bcb.gob.bo/',
+                        'scraped_at': '2025-11-27T08:00:00Z'
+                    },
+                    'created_at': '2025-11-27T08:00:00Z',
+                },
+                response_only=True,
+            ),
+        ],
+    )
+    @action(methods=['get'], detail=False, url_path='indicators/latest')
+    def indicators_latest(self, request):
+        """
+        Get most recent macroeconomic indicator with BCB exchange rate.
+
+        Returns:
+            Latest indicator with official BCB exchange rate data
+        """
+        indicator = MacroeconomicIndicator.objects.filter(
+            official_exchange_rate__isnull=False
+        ).order_by('-date').first()
+
+        if not indicator:
+            return Response({
+                'error': 'No indicators available',
+                'detail': 'BCB exchange rate data not yet collected. '
+                         'Please ensure the data collection task has run.'
+            }, status=404)
+
+        serializer = MacroeconomicIndicatorSerializer(indicator)
         return Response(serializer.data)
