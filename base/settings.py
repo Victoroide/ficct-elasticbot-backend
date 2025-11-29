@@ -146,10 +146,15 @@ CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='redis://localhost:
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
+CELERY_TIMEZONE = 'UTC'  # Use UTC for consistent task scheduling
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_RESULT_EXTENDED = True
+
+# Task reliability settings - prevent zombie tasks
+CELERY_TASK_ACKS_LATE = True  # Acknowledge task after completion, not before
+CELERY_TASK_REJECT_ON_WORKER_LOST = True  # Re-queue task if worker crashes
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Don't prefetch tasks aggressively
 
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 

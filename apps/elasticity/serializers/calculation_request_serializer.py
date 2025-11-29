@@ -4,6 +4,7 @@ Serializer for elasticity calculation requests.
 from rest_framework import serializers
 from datetime import timedelta
 from django.utils import timezone
+import pytz
 
 
 class CalculationRequestSerializer(serializers.Serializer):
@@ -17,6 +18,8 @@ class CalculationRequestSerializer(serializers.Serializer):
         "end_date": "2025-11-18T23:59:59Z",
         "window_size": "daily"
     }
+    
+    Note: All dates are normalized to UTC for consistent database querying.
     """
 
     method = serializers.ChoiceField(
@@ -26,11 +29,11 @@ class CalculationRequestSerializer(serializers.Serializer):
     )
 
     start_date = serializers.DateTimeField(
-        help_text="Start of analysis period (ISO 8601 format)"
+        help_text="Start of analysis period (ISO 8601 format). Will be normalized to UTC."
     )
 
     end_date = serializers.DateTimeField(
-        help_text="End of analysis period (ISO 8601 format)"
+        help_text="End of analysis period (ISO 8601 format). Will be normalized to UTC."
     )
 
     window_size = serializers.ChoiceField(
@@ -38,6 +41,32 @@ class CalculationRequestSerializer(serializers.Serializer):
         default='daily',
         help_text="Data aggregation window"
     )
+
+    def _normalize_to_utc(self, dt):
+        """
+        Normalize a datetime to UTC timezone.
+        
+        Handles:
+        - Naive datetimes (assumes default timezone)
+        - Aware datetimes in any timezone (converts to UTC)
+        """
+        if dt is None:
+            return None
+        
+        # If naive, make it aware using the default timezone
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt)
+        
+        # Convert to UTC
+        return dt.astimezone(pytz.UTC)
+
+    def validate_start_date(self, value):
+        """Normalize start_date to UTC."""
+        return self._normalize_to_utc(value)
+
+    def validate_end_date(self, value):
+        """Normalize end_date to UTC."""
+        return self._normalize_to_utc(value)
 
     def validate(self, attrs):
         """Cross-field validation."""
