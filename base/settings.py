@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'corsheaders',
     'django_celery_beat',
+    'django_celery_results',
     
     # Local apps (using apps/ structure) - ALL 5 APPS
     'apps.market_data',
@@ -140,9 +141,9 @@ CORS_ALLOWED_ORIGINS = env.list(
 )
 CORS_ALLOW_CREDENTIALS = True
 
-# Celery Configuration
-CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='redis://localhost:6379/0')
+# Celery Configuration - Database broker for reliability (no Redis dependency)
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='django://')
+CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='django-db')
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
