@@ -158,22 +158,55 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Don't prefetch tasks aggressively
 
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 
-# Cache Configuration
-# Use LocMemCache for testing, Redis for production
-if 'pytest' in sys.modules or env.bool('TESTING', default=False):
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'unique-snowflake',
-        }
-    }
-else:
+# ==============================================================================
+# ELASTICITY CALCULATION MODE
+# ==============================================================================
+# When True: Use Celery async tasks (requires Redis to be running)
+# When False: Execute calculations synchronously in the request (no Redis needed)
+#
+# Set to False if:
+# - Redis is not available or unstable
+# - You want guaranteed calculation completion (at cost of request latency)
+# - Development/testing without Redis
+#
+# Trade-offs:
+# - Async (True): Non-blocking requests, but fails silently if Redis is down
+# - Sync (False): Blocking requests (5-15s), but always works
+# ==============================================================================
+ELASTICITY_ASYNC_ENABLED = env.bool('ELASTICITY_ASYNC_ENABLED', default=False)
+
+# ==============================================================================
+# CACHE CONFIGURATION
+# ==============================================================================
+# Default: LocMemCache (no Redis needed)
+# Set REDIS_CACHE_ENABLED=True to use Redis (requires Redis server running)
+#
+# LocMemCache is sufficient for:
+# - Single-process deployments
+# - Development and testing
+# - When Redis is unavailable
+#
+# Use Redis when:
+# - Multiple workers need to share cache
+# - Cache persistence across restarts is needed
+# ==============================================================================
+REDIS_CACHE_ENABLED = env.bool('REDIS_CACHE_ENABLED', default=False)
+
+if REDIS_CACHE_ENABLED:
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
             'LOCATION': env('REDIS_URL', default='redis://localhost:6379/1'),
             'KEY_PREFIX': 'elasticbot',
             'TIMEOUT': env.int('CACHE_TTL_SECONDS', default=900),
+        }
+    }
+else:
+    # In-memory cache - works without Redis
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'elasticbot-cache',
         }
     }
 
@@ -203,6 +236,10 @@ else:
 BINANCE_P2P_API_URL = env('BINANCE_P2P_API_URL')
 BINANCE_API_TIMEOUT = env.int('BINANCE_API_TIMEOUT', default=10)
 BINANCE_MAX_RETRIES = env.int('BINANCE_MAX_RETRIES', default=3)
+
+# External OHLC API (usage-based pricing - call sparingly!)
+# Set to None/empty to disable the import command
+EXTERNAL_OHLC_API_URL = env('EXTERNAL_OHLC_API_URL', default=None)
 
 ELASTICITY_CALCULATION_TIMEOUT = env.int('ELASTICITY_CALCULATION_TIMEOUT', default=300)
 MAX_DATA_RETENTION_DAYS = env.int('MAX_DATA_RETENTION_DAYS', default=90)

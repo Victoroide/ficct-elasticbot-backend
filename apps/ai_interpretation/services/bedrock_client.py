@@ -1,10 +1,11 @@
 """
 AWS Bedrock integration for economic interpretation.
 
-Uses Llama 4 Maverick model for Spanish-language elasticity analysis.
+Redesigned to produce clean, plain-text interpretations without markdown or code artifacts.
 """
 import json
 import logging
+import re
 from typing import Dict
 from django.conf import settings
 
@@ -23,12 +24,15 @@ class BedrockClient:
     """
     AWS Bedrock client for LLM-powered economic interpretations.
 
-    Falls back to rule-based interpretation if AWS not configured.
+    Produces clean, plain-text Spanish interpretations without markdown or code.
     """
 
     MODEL_ID = "us.meta.llama4-maverick-17b-instruct-v1:0"
-    MAX_TOKENS = 1000
-    TEMPERATURE = 0.7
+    MAX_TOKENS = 400  # Reduced to prevent overly long responses
+    TEMPERATURE = 0.3  # Lower temperature for more consistent output
+
+    # Fixed system prompt for consistent behavior
+    SYSTEM_PROMPT = """Eres un economista que analiza resultados de elasticidad precio de la demanda para el mercado P2P de USDT/BOB en Bolivia. Debes escribir interpretaciones breves, claras y rigurosas en español, en uno o dos párrafos, usando solo texto plano (sin código, sin listas, sin markdown). No expliques cómo se implementa el cálculo, ni muestres código, ni describas pasos internos. No inventes datos adicionales: usa únicamente la información numérica y contextual que se te proporciona."""
 
     def __init__(self):
         self.client = None
@@ -56,7 +60,7 @@ class BedrockClient:
         data_context: Dict
     ) -> str:
         """
-        Generate economic interpretation of elasticity result.
+        Generate clean economic interpretation of elasticity result.
 
         Args:
             elasticity_coefficient: Calculated elasticity value
@@ -64,7 +68,7 @@ class BedrockClient:
             data_context: Additional context (period, data quality, etc.)
 
         Returns:
-            Spanish-language interpretation (250-300 words)
+            Spanish-language plain text interpretation (1-3 paragraphs)
         """
         if self.mock_mode or not self.client:
             return self._generate_mock_interpretation(
@@ -74,15 +78,19 @@ class BedrockClient:
             )
 
         try:
-            prompt = self._build_prompt(
+            user_prompt = self._build_user_prompt(
                 elasticity_coefficient,
                 classification,
                 data_context
             )
 
+            # Use proper Llama 4 format with system and user prompts
             request_body = {
-                "prompt": prompt,
-                "max_gen_len": self.MAX_TOKENS,
+                "messages": [
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "max_tokens": self.MAX_TOKENS,
                 "temperature": self.TEMPERATURE,
                 "top_p": 0.9
             }
@@ -93,56 +101,115 @@ class BedrockClient:
             )
 
             response_body = json.loads(response['body'].read())
-            interpretation = response_body.get('generation', '')
+            interpretation = response_body.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+            # Post-process to ensure clean output
+            interpretation = self._sanitize_output(interpretation)
 
             logger.info(
                 f"Generated interpretation via Bedrock: {len(interpretation)} chars",
                 extra={'elasticity': elasticity_coefficient, 'classification': classification}
             )
 
-            return interpretation.strip()
+            return interpretation
 
         except (ClientError, BotoCoreError) as e:
-            logger.error(f"Bedrock API error: {e}. Falling back to mock.", exc_info=True)
+            logger.error(f"Bedrock API error: {e}")
+            return self._generate_mock_interpretation(
+                elasticity_coefficient,
+                classification,
+                data_context
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error generating interpretation: {e}")
             return self._generate_mock_interpretation(
                 elasticity_coefficient,
                 classification,
                 data_context
             )
 
-    def _build_prompt(
+    def _sanitize_output(self, text: str) -> str:
+        """
+        Remove markdown, code blocks, and meta-commentary from LLM output.
+        """
+        if not text:
+            return "No se pudo generar interpretación con los datos actuales."
+
+        # Remove code blocks
+        text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+
+        # Remove markdown headers
+        text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+
+        # Remove bullet points and numbered lists
+        text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+
+        # Remove backticks
+        text = text.replace('`', '')
+
+        # Cut off at meta-commentary patterns
+        meta_patterns = [
+            r'El código.*?define',
+            r'La función.*?genera',
+            r'Here is.*?implementation',
+            r'This code.*?does',
+            r'La implementación.*?sigue',
+            r'Para generar.*?usamos'
+        ]
+
+        for pattern in meta_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                text = text[:match.start()]
+
+        # Clean up whitespace
+        text = text.strip()
+
+        # Limit length
+        if len(text) > 800:
+            text = text[:797] + '...'
+
+        # If after sanitization we have empty or meta-text, return fallback
+        if len(text) < 20 or any(pattern in text.lower() for pattern in ['código', 'función', 'implementation', 'define']):
+            return "No se pudo generar interpretación válida con los datos actuales. Revise manualmente los resultados numéricos."
+
+        return text
+
+    def _build_user_prompt(
         self,
         elasticity: float,
         classification: str,
         context: Dict
     ) -> str:
-        """Build prompt with Bolivian economic context."""
-        prompt = f"""Eres un economista especializado en el mercado boliviano de criptomonedas.
-
-**Contexto del Mercado Boliviano:**
-- Restricciones de acceso al dólar (BCB Resolución 144/2020)
-- USDT usado como refugio de valor, no especulación
-- Economía informal ~60% de transacciones
-- Tipo de cambio oficial: 6.96 BOB/USD (fijo desde 2011)
-
-**Resultado del Análisis de Elasticidad:**
-- Coeficiente de elasticidad: {elasticity:.4f}
+        """Build clean user prompt with calculation context."""
+        # Extract context values
+        method = context.get('method', 'Punto Medio')
+        period = context.get('period', 'última semana')
+        data_points = context.get('data_points', 50)
+        start_date = context.get('start_date', 'fecha de inicio')
+        end_date = context.get('end_date', 'fecha final')
+        
+        # Check reliability from metadata if available
+        reliability_info = context.get('reliability', {})
+        is_reliable = reliability_info.get('is_reliable', True)
+        
+        # Build clean user prompt
+        prompt = f"""Contexto del cálculo de elasticidad:
+- Coeficiente de elasticidad: {elasticity:.2f}
 - Clasificación: {classification.upper()}
-- Período analizado: {context.get('period', 'N/A')}
-- Puntos de datos: {context.get('data_points', 'N/A')}
-- Calidad de datos: {context.get('quality_score', 'N/A'):.2f}
+- Método: {method}
+- Periodo analizado: desde {start_date} hasta {end_date}
+- Ventana de agregación: por día
+- Puntos de datos usados: {data_points}
+- Contexto: mercado P2P de USDT/BOB en Bolivia, donde el USDT se usa como refugio de valor frente a la inflación y restricciones cambiarias
+{'- Nota: el cálculo fue marcado como de baja confiabilidad por poca variación en el precio o en la cantidad. Menciona esta cautela en tu interpretación.' if not is_reliable else ''}
 
-**Tarea:**
-Interpreta este resultado de elasticidad precio-demanda del par USDT/BOB en el contexto boliviano.
-Explica:
-1. Qué significa este coeficiente en términos económicos
-2. Por qué la demanda muestra este comportamiento en Bolivia
-3. Implicaciones para usuarios (ahorristas, empresas, traders)
-4. Comparación con criptomonedas volátiles (BTC: Ed ≈ -2.0)
+A partir de estos datos, escribe una interpretación breve en español (1-3 párrafos) que explique:
+1) Qué significa este valor de elasticidad para la sensibilidad de la demanda frente a cambios de precio.
+2) Qué implicaciones prácticas tiene para personas que usan USDT en Bolivia.
 
-**Formato:** 250-300 palabras en español académico pero accesible.
-
-**Interpretación:**"""
+Usa solo texto plano. No uses markdown, no muestres código, no expliques cómo se implementa la función ni hables del modelo de lenguaje."""
 
         return prompt
 
@@ -153,79 +220,27 @@ Explica:
         context: Dict
     ) -> str:
         """
-        Generate rule-based interpretation when Bedrock unavailable.
+        Generate clean rule-based interpretation when Bedrock unavailable.
+        Returns plain text without markdown or code artifacts.
         """
-        _ = abs(elasticity)  # Magnitude for classification reference
+        abs_e = abs(elasticity)
+        data_points = context.get('data_points', 50)
+        method = context.get('method', 'Punto Medio')
+        period = context.get('period', 'periodo analizado')
+        
+        # Check if result is reliable
+        is_unreliable = abs_e > 10
 
-        if classification == 'inelastic':
-            interpretation = f"""**Análisis de Elasticidad: Demanda Inelástica**
+        if is_unreliable:
+            interpretation = f"""El coeficiente de {elasticity:.2f} es inusualmente alto y debe interpretarse con cautela. Esto puede deberse a que el precio del USDT/BOB varió muy poco durante el periodo analizado, mientras que el volumen ofertado fluctuó por factores no relacionados con el precio. En el mercado boliviano, el USDT funciona como refugio de valor ante las restricciones cambiarias, por lo que pequeñas variaciones de precio pueden producir coeficientes extremos que no reflejan el comportamiento real de la demanda. Para obtener resultados más confiables, seleccione un periodo con mayor variación de precios o utilice el método de Regresión con más datos históricos."""
 
-El coeficiente de elasticidad precio-demanda calculado es {elasticity:.4f}, lo que indica una **demanda inelástica** (|Ed| < 1). Esto significa que los cambios en el precio del USDT generan variaciones proporcionalmente menores en la cantidad demandada.
+        elif classification.lower() == 'inelastic':
+            interpretation = f"""El coeficiente de {elasticity:.2f} indica demanda inelástica: los cambios en el precio del USDT generan cambios proporcionalmente menores en la cantidad demandada. En Bolivia, esto confirma que el USDT funciona como bien de necesidad, ya que las restricciones de acceso al dólar hacen que los usuarios mantengan su demanda incluso cuando el precio sube al no tener alternativas viables para proteger sus ahorros. La implicación práctica es que el mercado P2P es estable, con vendedores que pueden confiar en demanda consistente y compradores que encontrarán disponibilidad aunque el precio fluctúe."""
 
-**Interpretación en Contexto Boliviano:**
-
-En el mercado boliviano, este comportamiento inelástico del USDT se explica por su función como **refugio de valor** ante las restricciones de acceso al dólar estadounidense. A diferencia de criptomonedas volátiles como Bitcoin (elasticidad típica: -1.5 a -3.0), el USDT actúa como un bien de necesidad para preservar ahorros frente a la inflación.
-
-Las restricciones impuestas por el Banco Central de Bolivia (Resolución 144/2020) limitan severamente el acceso a divisas extranjeras, convirtiendo al USDT en una alternativa práctica para transacciones internacionales y protección del poder adquisitivo. Esta funcionalidad esencial reduce la sensibilidad de la demanda ante fluctuaciones de precio.
-
-**Implicaciones Prácticas:**
-
-- **Ahorristas:** La demanda se mantiene estable incluso con aumentos de precio, confirmando su rol como reserva de valor
-- **Empresas:** Pueden confiar en disponibilidad consistente para pagos internacionales
-- **Mercado P2P:** El spread precio-demanda se mantiene dentro de rangos predecibles
-
-**Validación Estadística:**
-
-Con {context.get('data_points', 'múltiples')} observaciones y calidad de datos de {context.get('quality_score', 0.85):.0%}, este resultado tiene significancia estadística robusta, confirmando la hipótesis de inelasticidad en el mercado boliviano de USDT.
-"""
-
-        elif classification == 'elastic':
-            interpretation = f"""**Análisis de Elasticidad: Demanda Elástica**
-
-El coeficiente de elasticidad precio-demanda calculado es {elasticity:.4f}, indicando una **demanda elástica** (|Ed| > 1). Los cambios en el precio del USDT generan variaciones proporcionalmente mayores en la cantidad demandada.
-
-**Interpretación en Contexto Boliviano:**
-
-Este comportamiento elástico es atípico para USDT en Bolivia y puede indicar:
-
-1. **Período de alta volatilidad:** Momentos de incertidumbre macroeconómica donde los usuarios ajustan rápidamente sus tenencias
-2. **Disponibilidad de alternativas:** Acceso temporal a dólares físicos o canales bancarios
-3. **Comportamiento especulativo:** Traders activos respondiendo a arbitraje
-
-Contrasta con la hipótesis esperada de inelasticidad para activos refugio. Sugiere que en este período específico, el USDT mostró características más similares a activos especulativos que a reservas de valor estables.
-
-**Implicaciones Prácticas:**
-
-- Mayor sensibilidad al precio puede generar oportunidades de arbitraje
-- Riesgo de volatilidad en spreads P2P
-- Posible señal de cambios en patrones de uso (ahorro → especulación)
-
-**Recomendación:** Analizar factores macroeconómicos del período ({context.get('period', 'analizado')}) para identificar causas de esta elasticidad inusualmente alta.
-"""
+        elif classification.lower() == 'elastic':
+            interpretation = f"""El coeficiente de {elasticity:.2f} indica demanda elástica: los cambios en el precio del USDT generan cambios proporcionalmente mayores en la cantidad demandada. Este comportamiento es atípico para el USDT en Bolivia, donde normalmente actúa como refugio de valor con demanda estable. Una elasticidad alta puede indicar un periodo de incertidumbre económica, disponibilidad temporal de alternativas al USDT, o actividad especulativa elevada. La implicación práctica es mayor volatilidad en el mercado P2P, con precios que pueden ajustarse rápidamente y oportunidades de arbitraje, pero también mayor riesgo."""
 
         else:  # unitary
-            interpretation = f"""**Análisis de Elasticidad: Demanda Unitaria**
+            interpretation = f"""El coeficiente de {elasticity:.2f} indica demanda unitaria: los cambios en precio y cantidad son proporcionales. Esto sugiere un mercado en equilibrio donde coexisten usuarios que necesitan USDT independientemente del precio (ahorristas) y usuarios sensibles al precio (traders), un comportamiento típico de mercados maduros. La implicación práctica es que el mercado P2P boliviano muestra estabilidad, con ingresos totales de los vendedores que se mantienen relativamente constantes aunque el precio varíe."""
 
-El coeficiente de elasticidad precio-demanda calculado es {elasticity:.4f}, indicando una **demanda unitaria** (|Ed| ≈ 1). Los cambios en el precio del USDT generan variaciones proporcionales en la cantidad demandada.
-
-**Interpretación en Contexto Boliviano:**
-
-La elasticidad unitaria representa un equilibrio entre sensibilidad e insensibilidad al precio. En el mercado boliviano de USDT, esto sugiere un mercado en **transición** o **balance** entre dos comportamientos:
-
-1. **Componente inelástico:** Usuarios que necesitan USDT independientemente del precio (necesidad)
-2. **Componente elástico:** Usuarios sensibles al precio que ajustan sus compras (discrecionalidad)
-
-Este balance puede reflejar la maduración del mercado P2P boliviano, donde conviven usuarios con diferentes perfiles y motivaciones.
-
-**Implicaciones Prácticas:**
-
-- Ingresos totales (P × Q) se mantienen relativamente estables ante cambios de precio
-- Mercado equilibrado con mezcla de ahorristas y traders
-- Potencial para segmentación de usuarios por sensibilidad al precio
-
-**Validación Estadística:**
-
-Con {context.get('data_points', 'múltiples')} observaciones, este resultado sugiere un mercado maduro con comportamiento predecible en el rango de precios analizado ({context.get('period', 'período observado')}).
-"""
-
-        return interpretation.strip()
+        return interpretation

@@ -46,17 +46,22 @@ class InterpretationCache:
         Retrieve cached interpretation if exists.
 
         Returns:
-            Cached interpretation text or None if not cached
+            Cached interpretation text or None if not cached or cache unavailable
         """
-        cache_key = cls.get_cache_key(elasticity, classification, context)
-        interpretation = cache.get(cache_key)
+        try:
+            cache_key = cls.get_cache_key(elasticity, classification, context)
+            interpretation = cache.get(cache_key)
 
-        if interpretation:
-            logger.info(f"Cache HIT for interpretation: {cache_key}")
-        else:
-            logger.info(f"Cache MISS for interpretation: {cache_key}")
+            if interpretation:
+                logger.info(f"Cache HIT for interpretation: {cache_key}")
+            else:
+                logger.debug(f"Cache MISS for interpretation: {cache_key}")
 
-        return interpretation
+            return interpretation
+        except Exception as e:
+            # Cache unavailable - continue without cache
+            logger.warning(f"Cache GET failed, continuing without cache: {e}")
+            return None
 
     @classmethod
     def set(
@@ -68,18 +73,25 @@ class InterpretationCache:
     ) -> None:
         """
         Cache interpretation with 24h TTL.
+        Fails silently if cache is unavailable.
         """
-        cache_key = cls.get_cache_key(elasticity, classification, context)
-        cache.set(cache_key, interpretation, cls.CACHE_TTL)
-
-        logger.info(f"Cached interpretation: {cache_key} (TTL: {cls.CACHE_TTL}s)")
+        try:
+            cache_key = cls.get_cache_key(elasticity, classification, context)
+            cache.set(cache_key, interpretation, cls.CACHE_TTL)
+            logger.info(f"Cached interpretation: {cache_key} (TTL: {cls.CACHE_TTL}s)")
+        except Exception as e:
+            # Cache unavailable - continue without caching
+            logger.warning(f"Cache SET failed, interpretation not cached: {e}")
 
     @classmethod
     def invalidate(cls, elasticity: float, classification: str, context: dict) -> None:
         """
         Manually invalidate cached interpretation.
+        Fails silently if cache is unavailable.
         """
-        cache_key = cls.get_cache_key(elasticity, classification, context)
-        cache.delete(cache_key)
-
-        logger.info(f"Invalidated cache: {cache_key}")
+        try:
+            cache_key = cls.get_cache_key(elasticity, classification, context)
+            cache.delete(cache_key)
+            logger.info(f"Invalidated cache: {cache_key}")
+        except Exception as e:
+            logger.warning(f"Cache DELETE failed: {e}")

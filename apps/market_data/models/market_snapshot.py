@@ -49,14 +49,15 @@ class MarketSnapshot(models.Model):
         max_digits=12,
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Total USDT volume available"
+        help_text="Total USDT volume available. Null for OHLC sources that don't provide volume.",
+        null=True,
+        blank=True
     )
 
     spread_percentage = models.DecimalField(
         max_digits=6,
         decimal_places=4,
-        validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Price spread as percentage",
+        help_text="Price spread as percentage. Can be negative if sell_price < buy_price.",
         null=True,
         blank=True
     )

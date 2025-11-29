@@ -19,8 +19,9 @@
 9. [Testing Guide](#-testing-guide)
 10. [Deployment](#-deployment)
 11. [Environment Variables](#-environment-variables)
-12. [Troubleshooting](#-troubleshooting)
-13. [Academic References](#-academic-references)
+12. [Data Sources](#data-sources)
+13. [Troubleshooting](#-troubleshooting)
+14. [Academic References](#-academic-references)
 
 ---
 
@@ -764,6 +765,236 @@ SENTRY_DSN=https://xxx@sentry.io/xxx
 
 ---
 
+## Data Sources
+
+### Source Comparison
+
+| Attribute | P2P Scraper | External OHLC API | P2P Historical JSON |
+|-----------|-------------|-------------------|---------------------|
+| **Quality Score** | 0.7+ | 0.95 | 0.80 |
+| **Source ID** | `binance_p2p` | `external_ohlc_api` | `p2p_scrape_json` |
+| **Volume Data** | ✅ Real volume | ❌ Not available (null) | ❌ Not available (0) |
+| **Prices** | ✅ Real-time | ✅ Historical OHLC | ✅ Historical averages |
+| **Used for Elasticity** | ❌ | ✅ | ❌ |
+| **Used for Charts** | ✅ | ✅ (prices only) | ✅ |
+
+### Primary: Binance P2P Scraper (Automated)
+
+The system automatically collects USDT/BOB market data from Binance P2P every 30 minutes via Celery Beat.
+
+**Data captured:**
+- Average sell/buy prices
+- **Total volume** (real trading volume from Binance P2P)
+- Number of active traders
+- Spread percentage
+
+### Secondary: External OHLC API (Manual Import)
+
+For historical data backfill when the database lacks sufficient data.
+
+```
+⚠️ CRITICAL: This API has USAGE-BASED PRICING!
+Every request costs money. Use sparingly.
+```
+
+**Important:** The OHLC API does **NOT provide volume data**. It only returns price candles (open, high, low, close). The `total_volume` field is set to `null` for OHLC records. For volume analysis, use P2P scraper data.
+
+### Tertiary: Historical P2P JSON Import
+
+For importing legacy P2P scrape data from `p2p_scrapes.json`.
+
+```bash
+# Preview import
+python manage.py import_p2p_scrapes --dry-run
+
+# Execute import
+python manage.py import_p2p_scrapes --confirm
+```
+
+**Note:** Historical P2P data has `total_volume=0` (volume was not captured by the original scraper). Use current P2P scraper data for volume analysis.
+
+**Setup:**
+1. Add to `.env`:
+   ```
+   EXTERNAL_OHLC_API_URL='https://your-api-endpoint.amazonaws.com/prod/ohlc'
+   ```
+
+**Usage:**
+```bash
+# Test configuration without making API call
+python manage.py import_ohlc_history --dry-run
+
+# Actually import data (requires --confirm flag)
+python manage.py import_ohlc_history --confirm
+
+# Skip existing data check
+python manage.py import_ohlc_history --confirm --force
+```
+
+**Inside Docker:**
+```bash
+docker exec elasticbot-web python manage.py import_ohlc_history --confirm
+```
+
+**What it does:**
+- Imports 200 hourly candles (~8 days of USDT/BOB data)
+- Data is stored permanently for all future calculations
+- Idempotent: safe to re-run, duplicates are skipped
+
+**Cost-Saving Design:**
+- `--confirm` flag required to prevent accidental execution
+- Warns if data already exists before making API call
+- Fixed parameters optimized for maximum value per call
+- NO automated/scheduled execution - manual only
+
+### Data Quality Policy
+
+The elasticity calculation engine uses **exclusively** high-quality data from the external OHLC API:
+
+| Field | Policy |
+|-------|--------|
+| `data_quality_score` | Must be >= 0.95 (external API marker) |
+| `raw_response.source` | Must be `external_ohlc_api` |
+| `num_active_traders` | **NOT USED** in any calculation (always 0) |
+
+**Cleanup Command:**
+```bash
+# Preview what will be deleted
+docker exec elasticbot-web python manage.py cleanup_market_data --dry-run
+
+# Execute cleanup (removes non-external API data)
+docker exec elasticbot-web python manage.py cleanup_market_data --confirm
+```
+
+**Design Principles:**
+1. **Single Source of Truth:** Only external OHLC API data is used for calculations
+2. **No Runtime Dependencies:** System operates on local database only
+3. **Full OHLC Preserved:** `raw_response` contains complete candle data (open, high, low, close) for future frontend charting
+4. **No Automatic API Calls:** External API was called once; future updates require manual intervention
+
+### Extending Historical Data
+
+**API Limitation:** The external API returns the *last N points* only - no offset or date range parameters. To extend history, run imports periodically (manually) over time.
+
+**Timeframe Options:**
+| Timeframe | 200 points = | Best for |
+|-----------|--------------|----------|
+| `10m` | ~33 hours | High-frequency analysis |
+| `30m` | ~4 days | Intraday patterns |
+| `1h` | ~8 days | Standard elasticity (recommended) |
+
+**Building History Over Time:**
+```bash
+# Check current coverage
+curl http://localhost:8000/api/v1/market-data/coverage/
+
+# Run import to capture latest data (can be repeated weekly/monthly)
+docker exec elasticbot-web python manage.py import_ohlc_history --confirm
+
+# Example with different timeframe
+docker exec elasticbot-web python manage.py import_ohlc_history --confirm --timeframe 30m
+```
+
+**Strategy for 30+ Days of History:**
+1. Run initial import (~8 days)
+2. Wait 1 week, run again (captures new week + overlap)
+3. Repeat weekly to accumulate ~30 days after 4 weeks
+4. Each run is idempotent - duplicates are skipped
+
+**Cost Control:**
+- Each execution = 1 paid API call
+- The command shows current coverage and asks for confirmation
+- Use `--dry-run` to preview without calling API
+- Never automate this command
+
+### Coverage Endpoint for Frontend
+
+The frontend can query the data coverage range:
+
+```bash
+GET /api/v1/market-data/coverage/
+```
+
+**Response:**
+```json
+{
+  "coverage_start": "2025-11-20T18:00:00+00:00",
+  "coverage_end": "2025-11-29T01:00:00+00:00",
+  "total_records": 200,
+  "span_days": 8.29,
+  "span_hours": 199,
+  "data_source": "external_ohlc_api",
+  "quality_threshold": 0.95,
+  "timeframes": ["1h"]
+}
+```
+
+Use this to:
+- Set min/max bounds on date pickers
+- Show data availability in the UI
+
+### Aggregated Data Endpoint (Backend-Driven Charts)
+
+The frontend should use this endpoint instead of doing client-side aggregation:
+
+```bash
+GET /api/v1/market-data/aggregated/?time_range=7d&granularity=daily&source=all
+```
+
+**Parameters:**
+| Parameter | Options | Description |
+|-----------|---------|-------------|
+| `time_range` | `24h`, `7d`, `30d`, `90d` | Preset time range |
+| `granularity` | `hourly`, `daily`, `weekly` | Aggregation level |
+| `source` | `p2p`, `ohlc`, `all` | Data source filter |
+| `start_date` | ISO 8601 | Custom start (use with end_date) |
+| `end_date` | ISO 8601 | Custom end (use with start_date) |
+
+**Response:**
+```json
+{
+  "time_range": "7d",
+  "granularity": "daily",
+  "coverage_start": "2025-11-22T00:00:00+00:00",
+  "coverage_end": "2025-11-28T00:00:00+00:00",
+  "span_days": 6.0,
+  "data_source": "p2p_scrape_json",
+  "total_records": 168,
+  "aggregated_points": 7,
+  "points": [
+    {
+      "timestamp": "2025-11-22T00:00:00+00:00",
+      "average_buy_price": 6.92,
+      "average_sell_price": 7.05,
+      "total_volume": null,
+      "spread_percentage": 1.86,
+      "record_count": 24,
+      "has_volume_data": false
+    }
+  ]
+}
+```
+
+**Notes:**
+- `total_volume` is `null` when source is `ohlc` (OHLC API doesn't provide volume)
+- `has_volume_data` indicates if volume data was available for the aggregation period
+- For volume charts, use `source=p2p` to ensure real volume data
+
+### Maintenance Commands
+
+**Fix OHLC Volume (backfill):**
+```bash
+# Preview fix (shows synthetic volumes that will be set to null)
+python manage.py fix_ohlc_volume --dry-run
+
+# Execute fix
+python manage.py fix_ohlc_volume --confirm
+```
+
+This command fixes OHLC records that have incorrect synthetic volume values (from a previous bug that calculated fake volume from price ranges). After running, OHLC records will have `total_volume=null` as they should.
+
+---
+
 ## Troubleshooting
 
 ### Common Issues
@@ -806,6 +1037,62 @@ python -c "import dj_database_url; print(dj_database_url.config())"
 pip install -e .
 python manage.py collectstatic --noinput
 ```
+
+#### 7. Calculations Fail with "No market data available"
+This means the database lacks MarketSnapshot records for the requested date range.
+
+```bash
+# Check available data range
+docker exec elasticbot-web python manage.py shell -c "
+from apps.market_data.models import MarketSnapshot
+first = MarketSnapshot.objects.order_by('timestamp').first()
+last = MarketSnapshot.objects.order_by('timestamp').last()
+print(f'Data range: {first.timestamp if first else None} to {last.timestamp if last else None}')
+print(f'Total records: {MarketSnapshot.objects.count()}')
+"
+
+# Import historical data if needed
+docker exec elasticbot-web python manage.py import_ohlc_history --timeframe 1h --points 200
+```
+
+### Elasticity Calculation Execution Mode
+
+The elasticity calculation endpoint supports two execution modes:
+
+| Mode | Setting | Behavior |
+|------|---------|----------|
+| **Sync** (default) | `ELASTICITY_ASYNC_ENABLED=False` | Calculation runs in the request (5-15s latency) |
+| **Async** | `ELASTICITY_ASYNC_ENABLED=True` | Calculation queued to Celery (requires Redis) |
+
+**When to use Sync mode:**
+- Redis is not available or unstable
+- You want guaranteed calculation completion
+- Development/testing without Redis infrastructure
+
+**When to use Async mode:**
+- Redis and Celery are running reliably
+- You need non-blocking API responses
+- High concurrency with multiple simultaneous calculations
+
+**Configuration:**
+```bash
+# .env file
+ELASTICITY_ASYNC_ENABLED=False  # Sync mode (default, no Redis needed)
+# or
+ELASTICITY_ASYNC_ENABLED=True   # Async mode (requires Redis)
+```
+
+**Trade-offs:**
+
+| Aspect | Sync Mode | Async Mode |
+|--------|-----------|------------|
+| Request latency | 5-15 seconds | Instant (202 response) |
+| Redis dependency | Not required | Required |
+| Reliability | Always works | Fails if Redis is down |
+| Response | Complete result | Requires polling |
+
+**Automatic Fallback:**
+When `ELASTICITY_ASYNC_ENABLED=True` but Redis is unavailable, the system automatically falls back to sync mode and logs a warning.
 
 ### Debug Mode
 

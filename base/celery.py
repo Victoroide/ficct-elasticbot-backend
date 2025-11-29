@@ -8,8 +8,19 @@ app = Celery('elasticbot')
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
+# =============================================================================
+# CELERY BEAT SCHEDULE
+# =============================================================================
+# NOTE: The external OHLC API is NOT called by any scheduled task.
+# External API data was imported once via manual command and is used exclusively
+# for elasticity calculations (filtered by data_quality_score >= 0.95).
+#
+# The P2P scraper below collects data for monitoring purposes only.
+# Its data (quality ~0.8) is automatically excluded from elasticity calculations.
+# =============================================================================
 app.conf.beat_schedule = {
-    # Market data collection - every 30 minutes for better granularity
+    # P2P Scraper - for market monitoring (NOT used in elasticity calculations)
+    # Data quality ~0.8 is filtered out by elasticity engine (requires >= 0.95)
     'fetch-binance-p2p-frequent': {
         'task': 'apps.market_data.tasks.fetch_binance_data',
         'schedule': crontab(minute='*/30'),  # Every 30 minutes

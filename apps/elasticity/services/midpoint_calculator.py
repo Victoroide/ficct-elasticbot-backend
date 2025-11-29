@@ -2,12 +2,31 @@
 Midpoint elasticity calculator using the arc elasticity formula.
 
 Reference: Mankiw, N. G. (2020). Principles of Economics (6th ed.), Chapter 5
+
+IMPORTANT NOTES ON P2P MARKET DATA:
+- total_volume represents STOCK/OFFER LEVEL (available ads), NOT traded volume
+- Volume can fluctuate wildly based on advertiser activity, not price
+- Price in P2P is relatively stable (rarely moves more than 2-3% per week)
+- This can produce misleading elasticity coefficients
+
+THRESHOLDS:
+- Minimum price variation: 0.5% (smaller variations give unreliable results)
+- Maximum reasonable elasticity: |50| (larger values flagged as unreliable)
 """
 from decimal import Decimal
 from typing import Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Minimum percentage price change required for reliable elasticity
+MIN_PRICE_VARIATION_PCT = Decimal('0.5')  # 0.5%
+
+# Maximum reasonable elasticity coefficient (larger = unreliable)
+# For typical markets: |Ed| < 5 is normal
+# For P2P markets with volatile volume: |Ed| < 10 is acceptable
+# Anything > 10 likely indicates volume changes driven by non-price factors
+MAX_REASONABLE_ELASTICITY = Decimal('10')
 
 
 class MidpointElasticityCalculator:
@@ -24,6 +43,10 @@ class MidpointElasticityCalculator:
         |Ed| > 1: Elastic (quantity changes proportionally more than price)
         |Ed| < 1: Inelastic (quantity changes proportionally less than price)
         |Ed| ≈ 1: Unitary elastic (proportional changes)
+    
+    Reliability checks:
+        - Price must vary by at least 0.5% for meaningful results
+        - Coefficients > |50| are flagged as unreliable
     """
 
     def calculate(
@@ -49,10 +72,11 @@ class MidpointElasticityCalculator:
                 - classification: 'elastic', 'inelastic', or 'unitary'
                 - percentage_change_quantity: % change in quantity
                 - percentage_change_price: % change in price
+                - is_reliable: Boolean indicating if result is trustworthy
+                - reliability_note: Explanation if unreliable
 
         Raises:
-            ValueError: If prices are negative or zero
-            ZeroDivisionError: If price change is zero (undefined elasticity)
+            ValueError: If prices are negative/zero or insufficient variation
         """
         # Input validation
         if price_initial <= 0 or price_final <= 0:
@@ -69,13 +93,34 @@ class MidpointElasticityCalculator:
         quantity_change = quantity_final - quantity_initial
         price_change = price_final - price_initial
 
-        # Check for zero price change
+        # Calculate percentage changes
+        pct_change_price = abs(price_change / price_midpoint) * Decimal('100')
+        
+        # Log detailed input values for debugging
+        logger.info(
+            f"Elasticity calculation inputs: "
+            f"P_initial={price_initial:.4f}, P_final={price_final:.4f}, "
+            f"ΔP={price_change:.4f}, ΔP%={pct_change_price:.2f}%, "
+            f"Q_initial={quantity_initial:.2f}, Q_final={quantity_final:.2f}, "
+            f"ΔQ={quantity_change:.2f}"
+        )
+
+        # VALIDATION: Check minimum price variation
+        if pct_change_price < MIN_PRICE_VARIATION_PCT:
+            raise ValueError(
+                f"Insufficient price variation: {pct_change_price:.2f}% "
+                f"(minimum required: {MIN_PRICE_VARIATION_PCT}%). "
+                f"Price range {price_initial:.4f} to {price_final:.4f} is too narrow "
+                f"for meaningful elasticity calculation."
+            )
+
+        # Check for zero price change (shouldn't happen after above check, but safety)
         if price_change == 0:
-            raise ZeroDivisionError("Price change cannot be zero - elasticity undefined")
+            raise ValueError("Price change cannot be zero - elasticity undefined")
 
         # Calculate percentage changes using midpoint method
         pct_change_quantity = (quantity_change / quantity_midpoint) * Decimal('100')
-        pct_change_price = (price_change / price_midpoint) * Decimal('100')
+        pct_change_price_signed = (price_change / price_midpoint) * Decimal('100')
 
         # Calculate elasticity coefficient
         elasticity = (quantity_change / quantity_midpoint) / (price_change / price_midpoint)
@@ -91,11 +136,28 @@ class MidpointElasticityCalculator:
         else:
             classification = 'unitary'
 
+        # RELIABILITY CHECK: Flag extreme values
+        is_reliable = abs_elasticity <= MAX_REASONABLE_ELASTICITY
+        reliability_note = None
+        
+        if not is_reliable:
+            reliability_note = (
+                f"Elasticity coefficient |{abs_elasticity:.2f}| exceeds reasonable range (|{MAX_REASONABLE_ELASTICITY}|). "
+                f"This may indicate: (1) price variation too small ({pct_change_price:.2f}%), "
+                f"(2) volume changes driven by factors other than price, "
+                f"(3) insufficient data quality. Interpret with caution."
+            )
+            logger.warning(f"Unreliable elasticity: {reliability_note}")
+
         logger.info(
-            f"Midpoint elasticity calculated: {elasticity:.4f}",
+            f"Midpoint elasticity calculated: {elasticity:.4f} ({classification}), "
+            f"reliable={is_reliable}",
             extra={
                 'elasticity': float(elasticity),
-                'classification': classification
+                'classification': classification,
+                'is_reliable': is_reliable,
+                'pct_change_price': float(pct_change_price),
+                'pct_change_quantity': float(pct_change_quantity),
             }
         )
 
@@ -104,9 +166,19 @@ class MidpointElasticityCalculator:
             'abs_value': float(abs_elasticity),
             'classification': classification,
             'percentage_change_quantity': float(pct_change_quantity),
-            'percentage_change_price': float(pct_change_price),
+            'percentage_change_price': float(pct_change_price_signed),
             'quantity_change': float(quantity_change),
             'price_change': float(price_change),
+            'is_reliable': is_reliable,
+            'reliability_note': reliability_note,
+            'metadata': {
+                'price_initial': float(price_initial),
+                'price_final': float(price_final),
+                'quantity_initial': float(quantity_initial),
+                'quantity_final': float(quantity_final),
+                'price_midpoint': float(price_midpoint),
+                'quantity_midpoint': float(quantity_midpoint),
+            }
         }
 
     def calculate_from_series(

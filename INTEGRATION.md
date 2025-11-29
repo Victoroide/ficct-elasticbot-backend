@@ -552,11 +552,26 @@ Content-Disposition: attachment; filename="elasticity_550e8400.pdf"
 
 For elasticity calculations, follow this flow:
 
-1. **POST** `/api/v1/elasticity/calculate/` → Receive `id` and `status: "PENDING"`
+1. **POST** `/api/v1/elasticity/calculate/` with required body → Receive `id` and `status`
 2. **Poll** every 2 seconds to `/api/v1/elasticity/{id}/status/`
 3. When `is_complete: true` → **GET** `/api/v1/elasticity/{id}/` for full result
 4. If `has_error: true` → Display `error_message`
 5. **Recommended timeout:** 60 seconds (30 attempts × 2 seconds)
+
+**Required Request Body:**
+```json
+{
+  "start_date": "2025-11-20T00:00:00Z",  // Required
+  "end_date": "2025-11-29T23:59:59Z",    // Required
+  "method": "midpoint",                  // Optional, default: "midpoint"
+  "window_size": "daily"                 // Optional, default: "daily"
+}
+```
+
+**Common Errors:**
+- 400 Bad Request: Missing required fields (`start_date` or `end_date`)
+- 400 Bad Request: Invalid date format or date range
+- 404 Not Found: Calculation ID doesn't exist
 
 ---
 

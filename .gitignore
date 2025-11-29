@@ -61,3 +61,5 @@ Thumbs.db
 # Reports
 reports/*.pdf
 exports/*.csv
+
+p2p_scrapes.json

@@ -1,8 +1,33 @@
 """
 Celery tasks for async elasticity calculations.
+
+==============================================================================
+DATA SOURCE SEPARATION - CRITICAL DESIGN DECISION
+==============================================================================
+
+Elasticity calculations use ONLY high-quality data from the external OHLC API
+(source='external_ohlc_api', data_quality_score >= 0.95). This ensures:
+
+1. CONSISTENT, RELIABLE price data from Binance exchange
+2. NO MIXING of scraped P2P data with exchange OHLC data
+3. num_active_traders is NOT used in any calculation (always 0 for external data)
+
+Historical P2P scrapes (source='p2p_scrape_json', quality=0.80) are EXCLUDED
+from elasticity calculations by design. They are stored for:
+- Visualization in the "Historial de Precios" chart
+- Historical context and exploratory analysis
+- Data comparison and validation
+
+The quality threshold (0.95) acts as a strict filter that automatically
+excludes all P2P data (0.80) from elasticity calculations.
+
+The external API was called once to populate historical data. The system now
+operates entirely on local database records without external API dependencies.
+==============================================================================
 """
 from celery import shared_task
 from decimal import Decimal
+from datetime import timezone as dt_timezone
 from django.utils import timezone
 from apps.elasticity.models import ElasticityCalculation
 from apps.elasticity.services import (
@@ -17,6 +42,10 @@ logger = logging.getLogger(__name__)
 # Minimum data points required for each calculation method
 MIN_DATA_POINTS_MIDPOINT = 2
 MIN_DATA_POINTS_REGRESSION = 5
+
+# Quality threshold for external OHLC API data
+# Only data with this score is used in calculations (filters out old/scraped data)
+EXTERNAL_API_QUALITY_THRESHOLD = 0.95
 
 
 @shared_task(bind=True, max_retries=3, acks_late=True, reject_on_worker_lost=True)
@@ -55,14 +84,36 @@ def calculate_elasticity_async(self, calculation_id: str):
             extra={'start_utc': start_date_utc.isoformat(), 'end_utc': end_date_utc.isoformat()}
         )
 
-        # Fetch market data for period
+        # ==================================================================
+        # STRICT FILTER: External OHLC API data ONLY
+        # ==================================================================
+        # This filter ensures elasticity calculations use ONLY:
+        # - source='external_ohlc_api' (high-quality exchange data)
+        # - data_quality_score >= 0.95
+        #
+        # EXCLUDED by design:
+        # - source='p2p_scrape_json' (historical P2P scrapes, quality=0.80)
+        #   These are for visualization only, not for elasticity calculations.
+        # ==================================================================
         snapshots = MarketSnapshot.objects.filter(
             timestamp__gte=start_date_utc,
             timestamp__lte=end_date_utc,
-            data_quality_score__gte=0.7  # Only high-quality data
+            data_quality_score__gte=EXTERNAL_API_QUALITY_THRESHOLD  # Only external API data (0.95+)
         ).order_by('timestamp')
 
         snapshot_count = snapshots.count()
+        
+        logger.info(
+            f"Query executed: {start_date_utc.date()} to {end_date_utc.date()}, "
+            f"quality >= {EXTERNAL_API_QUALITY_THRESHOLD}, found {snapshot_count} snapshots",
+            extra={
+                'calculation_id': calculation_id,
+                'start_date': start_date_utc.isoformat(),
+                'end_date': end_date_utc.isoformat(),
+                'quality_threshold': EXTERNAL_API_QUALITY_THRESHOLD,
+                'snapshot_count': snapshot_count
+            }
+        )
         
         # Determine minimum required data points based on method
         min_required = (
@@ -74,21 +125,22 @@ def calculate_elasticity_async(self, calculation_id: str):
         if snapshot_count == 0:
             _fail_calculation(
                 calculation,
-                f"No market data available for the period {start_date_utc.date()} to {end_date_utc.date()}. "
-                f"Please verify data exists and meets quality threshold (score >= 0.7)."
+                f"No high-quality OHLC data available for the period {start_date_utc.date()} to {end_date_utc.date()}. "
+                f"Only external API data (quality >= {EXTERNAL_API_QUALITY_THRESHOLD}) is used for calculations. "
+                f"Check that imported data covers this date range."
             )
             return {'calculation_id': calculation_id, 'status': 'FAILED', 'error': 'no_data'}
 
         if snapshot_count < min_required:
             _fail_calculation(
                 calculation,
-                f"Insufficient data points: found {snapshot_count}, but {calculation.method} method "
+                f"Insufficient high-quality data points: found {snapshot_count}, but {calculation.method} method "
                 f"requires at least {min_required}. Try expanding the date range or using a different method."
             )
             return {'calculation_id': calculation_id, 'status': 'FAILED', 'error': 'insufficient_data'}
 
         logger.info(
-            f"Found {snapshot_count} data points for calculation {calculation_id}",
+            f"Found {snapshot_count} high-quality data points for calculation {calculation_id}",
             extra={'calculation_id': calculation_id, 'snapshot_count': snapshot_count}
         )
 
@@ -126,21 +178,41 @@ def calculate_elasticity_async(self, calculation_id: str):
         if 'standard_error' in result:
             calculation.standard_error = Decimal(str(result['standard_error']))
 
-        # Store metadata
+        # Store metadata - includes data source and quality filtering information
         calculation.calculation_metadata = {
             'method_details': result.get('metadata', {}),
             'data_quality': {
                 'avg_quality': sum(s.data_quality_score for s in snapshot_list) / len(snapshot_list),
                 'min_quality': min(s.data_quality_score for s in snapshot_list),
+                'quality_threshold': EXTERNAL_API_QUALITY_THRESHOLD,
             },
             'query_info': {
                 'start_date_utc': start_date_utc.isoformat(),
                 'end_date_utc': end_date_utc.isoformat(),
                 'snapshots_found': snapshot_count,
+            },
+            'data_source': {
+                'type': 'external_ohlc_api',
+                'description': 'High-quality OHLC data from Binance exchange via external API',
+                'note': 'num_active_traders not used (always 0 for external data)',
             }
         }
 
         calculation.average_data_quality = calculation.calculation_metadata['data_quality']['avg_quality']
+        
+        # Save all computed fields before marking completed
+        calculation.save(update_fields=[
+            'elasticity_coefficient',
+            'classification',
+            'data_points_used',
+            'confidence_interval_lower',
+            'confidence_interval_upper',
+            'r_squared',
+            'standard_error',
+            'calculation_metadata',
+            'average_data_quality',
+            'updated_at'
+        ])
         calculation.mark_completed()
 
         logger.info(
@@ -198,7 +270,7 @@ def _ensure_utc(dt):
         dt = timezone.make_aware(dt)
     
     # Convert to UTC for consistent database querying
-    return dt.astimezone(timezone.utc)
+    return dt.astimezone(dt_timezone.utc)
 
 
 def _fail_calculation(calculation, error_message: str):
