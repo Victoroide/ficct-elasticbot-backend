@@ -73,6 +73,10 @@ COPY --chown=elasticbot:elasticbot . .
 RUN mkdir -p /app/logs /app/staticfiles /app/media && \
     chown -R elasticbot:elasticbot /app
 
+# Copy and setup entrypoint script
+COPY --chown=elasticbot:elasticbot docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Switch to non-root user
 USER elasticbot
 
@@ -87,5 +91,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # Expose port
 EXPOSE ${PORT}
 
-# Default command (can be overridden in docker-compose)
-CMD ["gunicorn", "base.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-"]
+# Default service type (can be overridden via SERVICE_TYPE env var)
+ENV SERVICE_TYPE=web
+
+# Use entrypoint script for flexible service startup
+ENTRYPOINT ["/docker-entrypoint.sh"]

@@ -20,7 +20,11 @@ services:
     env_file:
       - .env
     environment:
+      - SERVICE_TYPE=web
       - DEBUG=False
+      - PORT=8000
+      - GUNICORN_WORKERS=4
+      - GUNICORN_TIMEOUT=120
       # Redis configuration (built from components in settings.py)
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -61,11 +65,13 @@ services:
       dockerfile: Dockerfile
     container_name: elasticbot-worker
     restart: unless-stopped
-    command: celery -A base worker -l info --concurrency=2
     env_file:
       - .env
     environment:
+      - SERVICE_TYPE=worker
       - DEBUG=False
+      - CELERY_CONCURRENCY=2
+      - CELERY_LOG_LEVEL=info
       # Redis configuration (built from components in settings.py)
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -103,11 +109,12 @@ services:
       dockerfile: Dockerfile
     container_name: elasticbot-beat
     restart: unless-stopped
-    command: celery -A base beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     env_file:
       - .env
     environment:
+      - SERVICE_TYPE=beat
       - DEBUG=False
+      - CELERY_LOG_LEVEL=info
       # Redis configuration (built from components in settings.py)
       - REDIS_HOST=redis
       - REDIS_PORT=6379
