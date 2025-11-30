@@ -1,12 +1,39 @@
 import os
+import logging
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_ready, beat_init
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'base.settings')
+
+logger = logging.getLogger(__name__)
 
 app = Celery('elasticbot')
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
+
+
+@worker_ready.connect
+def on_worker_ready(sender, **kwargs):
+    """Log when Celery worker is ready to accept tasks."""
+    logger.info("=" * 60)
+    logger.info("⚙️  CELERY WORKER READY")
+    logger.info(f"   Hostname: {sender.hostname}")
+    logger.info(f"   Concurrency: {sender.concurrency}")
+    logger.info(f"   Broker: {app.conf.broker_url}")
+    logger.info("=" * 60)
+
+
+@beat_init.connect
+def on_beat_init(sender, **kwargs):
+    """Log when Celery beat scheduler starts."""
+    logger.info("=" * 60)
+    logger.info("⏰ CELERY BEAT SCHEDULER INITIALIZED")
+    logger.info("   Scheduled tasks:")
+    for task_name, task_config in app.conf.beat_schedule.items():
+        schedule = task_config.get('schedule', 'unknown')
+        logger.info(f"   - {task_name}: {schedule}")
+    logger.info("=" * 60)
 
 # =============================================================================
 # CELERY BEAT SCHEDULE

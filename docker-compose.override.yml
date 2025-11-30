@@ -6,42 +6,17 @@
 # ==============================================================================
 
 services:
-  web:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    # Override entrypoint for development (use runserver instead of gunicorn)
-    entrypoint: []
-    command: python manage.py runserver 0.0.0.0:8000
     environment:
       - DEBUG=True
-      - SERVICE_TYPE=web
+      - CELERY_LOG_LEVEL=debug
     volumes:
       # Mount source code for hot reload
       - .:/app:cached
       - /app/.venv  # Exclude venv from mount
-    ports:
-      - "8000:8000"
-
-  worker:
-    entrypoint: []
-    command: celery -A base worker -l debug --concurrency=1
-    environment:
-      - DEBUG=True
-      - SERVICE_TYPE=worker
-    volumes:
-      - .:/app:cached
-      - /app/.venv
-
-  beat:
-    entrypoint: []
-    command: celery -A base beat -l debug --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    environment:
-      - DEBUG=True
-      - SERVICE_TYPE=beat
-    volumes:
-      - .:/app:cached
-      - /app/.venv
 
   # Flower for Celery monitoring (development only)
   flower:
@@ -49,6 +24,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: elasticbot-flower
+    entrypoint: []
     command: celery -A base flower --port=5555
     ports:
       - "5555:5555"
@@ -56,20 +32,15 @@ services:
       - .env
     environment:
       - DEBUG=True
-      # Redis configuration (built from components in settings.py)
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_USER=default
       - REDIS_PASSWORD=
-      # Override any external Redis URL
       - REDIS_URL=
-      # Force Celery to use internal Redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - ELASTICITY_ASYNC_ENABLED=True
-      - REDIS_CACHE_ENABLED=True
     depends_on:
       - redis
-      - worker
+      - app
     networks:
       - elasticbot-network

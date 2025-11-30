@@ -2,13 +2,13 @@
 
 ## Architecture Overview
 
-ElasticBot requires **THREE services** running simultaneously:
+ElasticBot runs **THREE processes in a SINGLE container** using supervisord:
 
-1. **Web** - Django REST API (Gunicorn)
+1. **Web** - Django REST API (Gunicorn) on port 8000
 2. **Worker** - Celery Worker (async task processing)
 3. **Beat** - Celery Beat (scheduled task scheduler)
 
-All three use the **same Docker image** but with different `SERVICE_TYPE` configurations.
+This simplifies deployment to **ONE Railway service** instead of three.
 
 ---
 
@@ -23,128 +23,55 @@ All three use the **same Docker image** but with different `SERVICE_TYPE` config
 
 ## Step-by-Step Setup
 
-### Step 1: Create the Web Service (Main Backend)
+### Step 1: Configure the Backend Service
 
-This may already exist as `ficct-elasticbot-backend`.
+Your service `ficct-elasticbot-backend` already exists. Just update the environment variables:
 
-1. Go to Railway Dashboard → Your Project
-2. If not exists, click **"New Service"** → **"GitHub Repo"**
-3. Select `ficct-elasticbot-backend` repository
-4. Railway will auto-detect the Dockerfile
+1. Go to Railway Dashboard → `ficct-elasticbot-backend` → **Variables**
+2. Add/update these variables:
 
-**Environment Variables for Web:**
 ```env
-SERVICE_TYPE=web
+# Required
 PORT=8000
 DEBUG=False
 SECRET_KEY=your-secret-key
 DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_URL=${{Redis.REDIS_URL}}
-CELERY_BROKER_URL=${{Redis.REDIS_URL}}
-CELERY_RESULT_BACKEND=${{Redis.REDIS_URL}}
 ALLOWED_HOSTS=your-domain.railway.app,localhost
-```
 
-### Step 2: Create the Celery Worker Service
+# Redis & Celery
+REDIS_URL=${{Redis.REDIS_URL}}
+CELERY_BROKER_URL=${{Redis.REDIS_URL}}
+CELERY_RESULT_BACKEND=${{Redis.REDIS_URL}}
 
-1. In Railway Dashboard → Click **"New Service"**
-2. Select **"GitHub Repo"** → Same repository
-3. Name it: `celery-worker`
-
-**Environment Variables for Worker:**
-```env
-SERVICE_TYPE=worker
-CELERY_LOG_LEVEL=info
+# Supervisord process configuration
+GUNICORN_WORKERS=4
+GUNICORN_TIMEOUT=120
 CELERY_CONCURRENCY=2
-DEBUG=False
-SECRET_KEY=your-secret-key
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_URL=${{Redis.REDIS_URL}}
-CELERY_BROKER_URL=${{Redis.REDIS_URL}}
-CELERY_RESULT_BACKEND=${{Redis.REDIS_URL}}
-```
-
-**Important:** Copy ALL environment variables from the Web service, then:
-- Change `SERVICE_TYPE=worker`
-- Remove `PORT` (worker doesn't need it)
-
-### Step 3: Create the Celery Beat Service
-
-1. In Railway Dashboard → Click **"New Service"**
-2. Select **"GitHub Repo"** → Same repository
-3. Name it: `celery-beat`
-
-**Environment Variables for Beat:**
-```env
-SERVICE_TYPE=beat
 CELERY_LOG_LEVEL=info
-DEBUG=False
-SECRET_KEY=your-secret-key
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_URL=${{Redis.REDIS_URL}}
-CELERY_BROKER_URL=${{Redis.REDIS_URL}}
-CELERY_RESULT_BACKEND=${{Redis.REDIS_URL}}
 ```
 
-**Important:** Copy ALL environment variables from the Web service, then:
-- Change `SERVICE_TYPE=beat`
-- Remove `PORT` (beat doesn't need it)
+3. **Redeploy** the service
 
----
-
-## Using Shared Variables (Recommended)
-
-To avoid duplicating variables across services:
-
-1. Go to Project Settings → **Shared Variables**
-2. Add common variables:
-   ```
-   SECRET_KEY=your-secret-key
-   DEBUG=False
-   DATABASE_URL=${{Postgres.DATABASE_URL}}
-   REDIS_URL=${{Redis.REDIS_URL}}
-   CELERY_BROKER_URL=${{Redis.REDIS_URL}}
-   CELERY_RESULT_BACKEND=${{Redis.REDIS_URL}}
-   ```
-3. Each service inherits shared variables automatically
-4. Override `SERVICE_TYPE` per service
+That's it! The single container runs all three processes via supervisord.
 
 ---
 
 ## Complete Environment Variables Reference
 
-### Required for ALL Services
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `SERVICE_TYPE` | Service type | `web`, `worker`, or `beat` |
-| `SECRET_KEY` | Django secret key | `your-super-secret-key` |
-| `DATABASE_URL` | PostgreSQL connection | `${{Postgres.DATABASE_URL}}` |
-| `REDIS_URL` | Redis connection | `${{Redis.REDIS_URL}}` |
-| `CELERY_BROKER_URL` | Celery broker | `${{Redis.REDIS_URL}}` |
-| `CELERY_RESULT_BACKEND` | Celery results | `${{Redis.REDIS_URL}}` |
-
-### Web Service Only
-
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `PORT` | HTTP port | `8000` |
+| `PORT` | HTTP port for Gunicorn | `8000` |
+| `SECRET_KEY` | Django secret key | Required |
+| `DATABASE_URL` | PostgreSQL connection | Required |
+| `REDIS_URL` | Redis connection | Required |
+| `CELERY_BROKER_URL` | Celery broker URL | Required |
+| `CELERY_RESULT_BACKEND` | Celery results backend | Required |
 | `ALLOWED_HOSTS` | Django allowed hosts | `localhost` |
-| `GUNICORN_WORKERS` | Number of workers | `4` |
-| `GUNICORN_TIMEOUT` | Request timeout | `120` |
-
-### Worker Service Only
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CELERY_CONCURRENCY` | Concurrent workers | `2` |
-| `CELERY_LOG_LEVEL` | Log level | `info` |
-
-### Beat Service Only
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CELERY_LOG_LEVEL` | Log level | `info` |
+| `GUNICORN_WORKERS` | Number of Gunicorn workers | `4` |
+| `GUNICORN_TIMEOUT` | Request timeout seconds | `120` |
+| `CELERY_CONCURRENCY` | Celery worker concurrency | `2` |
+| `CELERY_LOG_LEVEL` | Celery log level | `info` |
+| `DEBUG` | Django debug mode | `False` |
 
 ### Optional (API Keys)
 
@@ -158,37 +85,71 @@ To avoid duplicating variables across services:
 
 ## Verification
 
-### 1. Check Web Service Logs
+### 1. Check Startup Logs
 
-Should show:
+When the container starts, you should see:
+
 ```
-Starting Gunicorn web server...
+============================================================
+🚀 ElasticBot Backend - Multi-Process Startup
+============================================================
+Time: Sat Nov 30 18:00:00 UTC 2025
+============================================================
+
+📡 Checking database connection...
+✅ Database connection OK
+
+📦 Running database migrations...
+✅ Migrations complete
+
+📁 Collecting static files...
+✅ Static files collected
+
+============================================================
+📋 Configuration:
+   PORT: 8000
+   GUNICORN_WORKERS: 4
+   CELERY_CONCURRENCY: 2
+   CELERY_LOG_LEVEL: info
+============================================================
+
+🎬 Starting supervisord with 3 processes:
+   1. 🌐 Web (Gunicorn) - HTTP API server
+   2. ⚙️  Worker (Celery) - Async task processor
+   3. ⏰ Beat (Celery Beat) - Scheduled task sender
+
+📅 Scheduled Tasks:
+   - P2P Scrape: Every 30 min (XX:00, XX:30)
+   - BCB Rate: Daily at 8:00 AM Bolivia
+   - Cleanup: Weekly on Sundays
+============================================================
+```
+
+### 2. Check Process Logs
+
+After supervisord starts, you'll see:
+
+```
+======================================================
+🌐 [WEB] STARTING GUNICORN SERVER...
+======================================================
 [INFO] Starting gunicorn 21.x.x
 [INFO] Listening at: http://0.0.0.0:8000
-[INFO] Using worker: sync
-```
 
-### 2. Check Worker Service Logs
-
-Should show:
-```
-Starting Celery worker...
+======================================================
+⚙️  [WORKER] STARTING CELERY WORKER...
+======================================================
 [INFO] celery@hostname ready.
-[INFO] Connected to redis://...
-```
 
-### 3. Check Beat Service Logs
-
-Should show:
-```
-Starting Celery beat scheduler...
-[INFO] DatabaseScheduler: Schedule changed.
+======================================================
+⏰ [BEAT] STARTING CELERY BEAT SCHEDULER...
+======================================================
 [INFO] beat: Starting...
 ```
 
-### 4. Verify Scheduled Tasks
+### 3. Verify Scheduled Tasks
 
-Wait 30 minutes and check:
+Wait for the next :00 or :30 minute mark and check:
 ```sql
 SELECT timestamp, average_sell_price 
 FROM market_data_marketsnapshot 
@@ -196,7 +157,13 @@ ORDER BY timestamp DESC
 LIMIT 5;
 ```
 
-You should see new snapshots every ~30 minutes.
+Expected pattern (every 30 minutes):
+```
+2025-11-30 14:00:00  →  10.12
+2025-11-30 14:30:00  →  10.11
+2025-11-30 15:00:00  →  10.13
+2025-11-30 15:30:00  →  10.12
+```
 
 ---
 
@@ -269,25 +236,30 @@ python manage.py run_scraper
 │                      Railway Project                         │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │     Web      │  │    Worker    │  │     Beat     │       │
-│  │  (Gunicorn)  │  │   (Celery)   │  │   (Celery)   │       │
-│  │              │  │              │  │              │       │
-│  │ SERVICE_TYPE │  │ SERVICE_TYPE │  │ SERVICE_TYPE │       │
-│  │    = web     │  │   = worker   │  │    = beat    │       │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘       │
-│         │                 │                 │                │
-│         └────────┬────────┴────────┬────────┘                │
-│                  │                 │                         │
-│         ┌────────▼─────────────────▼────────┐               │
-│         │              Redis                 │               │
-│         │     (Broker + Result Backend)      │               │
-│         └───────────────────────────────────┘               │
-│                          │                                   │
-│         ┌────────────────▼──────────────────┐               │
-│         │           PostgreSQL               │               │
-│         │          (Database)                │               │
-│         └───────────────────────────────────┘               │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              ficct-elasticbot-backend                   │ │
+│  │                  (Single Container)                     │ │
+│  │                                                         │ │
+│  │  ┌─────────────────────────────────────────────────┐   │ │
+│  │  │              SUPERVISORD                         │   │ │
+│  │  │                                                  │   │ │
+│  │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐      │   │ │
+│  │  │  │   Web    │  │  Worker  │  │   Beat   │      │   │ │
+│  │  │  │ Gunicorn │  │  Celery  │  │  Celery  │      │   │ │
+│  │  │  │  :8000   │  │  async   │  │scheduler │      │   │ │
+│  │  │  └──────────┘  └──────────┘  └──────────┘      │   │ │
+│  │  └─────────────────────────────────────────────────┘   │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                            │                                 │
+│         ┌──────────────────┴──────────────────┐             │
+│         │              Redis                   │             │
+│         │     (Broker + Result Backend)        │             │
+│         └──────────────────┬──────────────────┘             │
+│                            │                                 │
+│         ┌──────────────────▼──────────────────┐             │
+│         │           PostgreSQL                 │             │
+│         │          (Database)                  │             │
+│         └─────────────────────────────────────┘             │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -296,16 +268,17 @@ python manage.py run_scraper
 
 ## Success Criteria
 
-✅ Three Railway services running:
-- `ficct-elasticbot-backend` (web)
-- `celery-worker`
-- `celery-beat`
+✅ **ONE Railway service** running with supervisord managing 3 processes
 
 ✅ Logs show:
-- Web: Gunicorn listening
-- Worker: Ready and connected to Redis
-- Beat: Scheduler started
+- `🚀 ElasticBot Backend - Multi-Process Startup`
+- `🌐 [WEB] STARTING GUNICORN SERVER...`
+- `⚙️  [WORKER] STARTING CELERY WORKER...`
+- `⏰ [BEAT] STARTING CELERY BEAT SCHEDULER...`
 
-✅ Database receiving new MarketSnapshots every ~30 minutes
+✅ Database receiving new MarketSnapshots every **30 minutes exactly**:
+```
+14:00 → 14:30 → 15:00 → 15:30 → 16:00 ...
+```
 
-✅ At least FOUR consecutive snapshots with ~30 minute spacing
+✅ At least **FOUR consecutive snapshots** with ~30 minute spacing

@@ -1,36 +1,36 @@
 # ==============================================================================
 # ElasticBot Backend - Docker Compose Configuration
 # ==============================================================================
-# Three-container architecture: web, worker, beat
-# Includes Redis for caching/broker and optional PostgreSQL
+# Single-container architecture using supervisord (web + worker + beat)
+# Includes Redis for caching/broker
 # ==============================================================================
 
 services:
   # ---------------------------------------------------------------------------
-  # Web Service - Django REST API with Gunicorn
+  # App Service - Django + Celery Worker + Celery Beat (via supervisord)
   # ---------------------------------------------------------------------------
-  web:
+  app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: elasticbot-web
+    container_name: elasticbot-app
     restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
       - .env
     environment:
-      - SERVICE_TYPE=web
       - DEBUG=False
       - PORT=8000
       - GUNICORN_WORKERS=4
       - GUNICORN_TIMEOUT=120
-      # Redis configuration (built from components in settings.py)
+      - CELERY_CONCURRENCY=2
+      - CELERY_LOG_LEVEL=info
+      # Redis configuration
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_USER=default
       - REDIS_PASSWORD=
-      # Override any external Redis URL
       - REDIS_URL=
       # Force Celery to use internal Redis
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -38,7 +38,7 @@ services:
       - ELASTICITY_ASYNC_ENABLED=True
       - REDIS_CACHE_ENABLED=True
       # Django configuration
-      - ALLOWED_HOSTS=localhost,127.0.0.1,elasticbot-web
+      - ALLOWED_HOSTS=localhost,127.0.0.1,elasticbot-app
       - CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
     volumes:
       - static_volume:/app/staticfiles
@@ -48,98 +48,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"]
-      interval: 15s
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
-    networks:
-      - elasticbot-network
-
-  # ---------------------------------------------------------------------------
-  # Worker Service - Celery Worker for async tasks
-  # ---------------------------------------------------------------------------
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: elasticbot-worker
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - SERVICE_TYPE=worker
-      - DEBUG=False
-      - CELERY_CONCURRENCY=2
-      - CELERY_LOG_LEVEL=info
-      # Redis configuration (built from components in settings.py)
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_USER=default
-      - REDIS_PASSWORD=
-      # Override any external Redis URL
-      - REDIS_URL=
-      # Force Celery to use internal Redis
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - ELASTICITY_ASYNC_ENABLED=True
-      - REDIS_CACHE_ENABLED=True
-    volumes:
-      - logs_volume:/app/logs
-    depends_on:
-      redis:
-        condition: service_healthy
-      web:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "pgrep", "-f", "celery"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    networks:
-      - elasticbot-network
-
-  # ---------------------------------------------------------------------------
-  # Beat Service - Celery Beat for scheduled tasks
-  # ---------------------------------------------------------------------------
-  beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: elasticbot-beat
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - SERVICE_TYPE=beat
-      - DEBUG=False
-      - CELERY_LOG_LEVEL=info
-      # Redis configuration (built from components in settings.py)
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_USER=default
-      - REDIS_PASSWORD=
-      # Override any external Redis URL
-      - REDIS_URL=
-      # Force Celery to use internal Redis
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - ELASTICITY_ASYNC_ENABLED=True
-      - REDIS_CACHE_ENABLED=True
-    volumes:
-      - logs_volume:/app/logs
-    depends_on:
-      redis:
-        condition: service_healthy
-      worker:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "pgrep", "-f", "celery"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+      start_period: 90s
     networks:
       - elasticbot-network
 

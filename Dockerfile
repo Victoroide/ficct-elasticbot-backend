@@ -74,25 +74,31 @@ RUN mkdir -p /app/logs /app/staticfiles /app/media && \
     chown -R elasticbot:elasticbot /app
 
 # Copy and setup entrypoint script
-COPY --chown=elasticbot:elasticbot docker-entrypoint.sh /docker-entrypoint.sh
+COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# Switch to non-root user
-USER elasticbot
+# Copy supervisord configuration
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Collect static files (if DEBUG=False)
+# Collect static files (if DEBUG=False) - as elasticbot user temporarily
+USER elasticbot
 RUN python manage.py collectstatic --noinput --clear 2>/dev/null || true
+USER root
+
+# Set default environment variables for supervisord
+ENV PORT=8000 \
+    GUNICORN_WORKERS=4 \
+    GUNICORN_TIMEOUT=120 \
+    CELERY_LOG_LEVEL=info \
+    CELERY_CONCURRENCY=2
 
 # Health check for container orchestrators
-# Uses simple endpoint for load balancer probes (no dependencies)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health/ || exit 1
 
 # Expose port
 EXPOSE ${PORT}
 
-# Default service type (can be overridden via SERVICE_TYPE env var)
-ENV SERVICE_TYPE=web
-
-# Use entrypoint script for flexible service startup
+# Use entrypoint for setup, then start supervisord
 ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
