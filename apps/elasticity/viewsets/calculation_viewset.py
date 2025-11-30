@@ -175,28 +175,28 @@ class CalculationViewSet(viewsets.ReadOnlyModelViewSet):
     def _execute_sync(self, calculation):
         """
         Execute calculation synchronously (blocking).
-        
+
         This mode is used when:
         - ELASTICITY_ASYNC_ENABLED=False
         - Redis/Celery is unavailable (fallback from async)
-        
+
         Trade-off: Request takes 5-15 seconds but always completes.
         """
         logger.info(
             f"Executing calculation {calculation.id} in SYNC mode",
             extra={'calculation_id': str(calculation.id)}
         )
-        
+
         try:
             # Execute calculation directly
             result = execute_calculation(str(calculation.id))
-            
+
             # Refresh from DB to get updated fields
             calculation.refresh_from_db()
-            
+
             # Return appropriate response based on result
             result_serializer = CalculationResultSerializer(calculation)
-            
+
             if result.get('status') == 'COMPLETED':
                 return Response(
                     result_serializer.data,
@@ -208,20 +208,20 @@ class CalculationViewSet(viewsets.ReadOnlyModelViewSet):
                     result_serializer.data,
                     status=status.HTTP_200_OK  # Still 200, status in body shows FAILED
                 )
-                
+
         except Exception as exc:
             logger.error(
                 f"Sync calculation {calculation.id} failed: {exc}",
                 exc_info=True,
                 extra={'calculation_id': str(calculation.id)}
             )
-            
+
             # Mark as failed
             calculation.status = 'FAILED'
             calculation.error_message = f"Calculation error: {str(exc)}"
             calculation.completed_at = timezone.now()
             calculation.save(update_fields=['status', 'error_message', 'completed_at', 'updated_at'])
-            
+
             result_serializer = CalculationResultSerializer(calculation)
             return Response(
                 result_serializer.data,
@@ -231,25 +231,25 @@ class CalculationViewSet(viewsets.ReadOnlyModelViewSet):
     def _execute_async(self, calculation):
         """
         Execute calculation asynchronously via Celery.
-        
+
         Falls back to sync mode if Redis is unavailable.
         """
         try:
             # Try to queue the Celery task
             calculate_elasticity_async.delay(str(calculation.id))
-            
+
             logger.info(
                 f"Queued calculation {calculation.id} to Celery",
                 extra={'calculation_id': str(calculation.id)}
             )
-            
+
             # Return 202 Accepted - client should poll for results
             result_serializer = CalculationResultSerializer(calculation)
             return Response(
                 result_serializer.data,
                 status=status.HTTP_202_ACCEPTED
             )
-            
+
         except Exception as exc:
             # Redis/Celery error - fall back to sync mode
             logger.warning(
@@ -259,7 +259,7 @@ class CalculationViewSet(viewsets.ReadOnlyModelViewSet):
                     'exception_type': type(exc).__name__
                 }
             )
-            
+
             # Execute synchronously as fallback
             return self._execute_sync(calculation)
 

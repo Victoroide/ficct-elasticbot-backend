@@ -17,11 +17,11 @@ Design decisions:
 - Ordered output: Always ascending by timestamp
 """
 from decimal import Decimal
-from datetime import datetime, timedelta, timezone as dt_timezone
-from typing import List, Dict, Any, Optional, Literal
-from collections import defaultdict
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
+from django.db.models import QuerySet
 from django.utils import timezone
-from django.db.models import QuerySet, Avg, Sum, Min, Max, Count
+from collections import defaultdict
 
 from apps.market_data.models import MarketSnapshot
 
@@ -52,7 +52,7 @@ SOURCE_FILTERS = ['p2p', 'ohlc', 'all']
 class AggregationService:
     """
     Service for aggregating market snapshot data for chart visualization.
-    
+
     Centralizes all aggregation logic that was previously on the frontend,
     providing efficient server-side processing and a single source of truth.
     """
@@ -153,7 +153,7 @@ class AggregationService:
         # Calculate coverage statistics
         coverage_start = points[0]['timestamp'] if points else None
         coverage_end = points[-1]['timestamp'] if points else None
-        
+
         if coverage_start and coverage_end:
             span_delta = coverage_end - coverage_start
             span_days = round(span_delta.total_seconds() / 86400, 2)
@@ -234,100 +234,64 @@ class AggregationService:
         - average_sell_price: Simple average of sell prices for the day
         - total_volume: AVERAGE of volumes for the day (not sum!)
         - spread_percentage: Average spread for the day
-        
+
         IMPORTANT - Volume semantics:
         In P2P snapshots, `total_volume` represents the STOCK/OFFER LEVEL
         (available volume in active ads at that moment), NOT traded volume.
-        
+
         Therefore:
         - Summing volumes across hours would count the same stock multiple times
         - We use AVERAGE to show the typical offer level for the day
         - `volume_sum` is included as metadata for reference
-        
+
         Note: OHLC data has estimated volume based on P2P averages.
         """
-        # Group by date (UTC)
-        by_date = defaultdict(list)
-        for s in snapshots:
-            date_key = s['timestamp'].date()
-            by_date[date_key].append(s)
+        # Group by date using defaultdict
+        daily_data = defaultdict(list)
 
-        points = []
-        for date_key in sorted(by_date.keys()):
-            day_snapshots = by_date[date_key]
-            
-            # Calculate averages
-            buy_prices = [
-                s['average_buy_price']
-                for s in day_snapshots
-                if s['average_buy_price'] is not None
-            ]
-            sell_prices = [
-                s['average_sell_price']
-                for s in day_snapshots
-                if s['average_sell_price'] is not None
-            ]
-            # Filter out null volumes (OHLC data doesn't have volume)
-            volumes = [
-                s['total_volume']
-                for s in day_snapshots
-                if s['total_volume'] is not None
-            ]
-            spreads = [
-                s['spread_percentage']
-                for s in day_snapshots
-                if s['spread_percentage'] is not None
-            ]
+        for snapshot in snapshots:
+            # Extract date part from timestamp
+            date_key = snapshot['timestamp'].date()
+            daily_data[date_key].append(snapshot)
 
-            # Use start of day (00:00:00 UTC) as aggregate timestamp
-            aggregate_timestamp = datetime.combine(
-                date_key,
-                datetime.min.time(),
-                tzinfo=dt_timezone.utc
-            )
+        # Aggregate each day's data
+        results = []
+        for date_key, day_snapshots in daily_data.items():
+            # Calculate averages for the day
+            avg_buy = sum(s['average_buy_price'] for s in day_snapshots) / len(day_snapshots)
+            avg_sell = sum(s['average_sell_price'] for s in day_snapshots) / len(day_snapshots)
+            avg_volume = sum(s['total_volume'] for s in day_snapshots) / len(day_snapshots)
+            avg_spread = sum(s['spread_percentage'] for s in day_snapshots) / len(day_snapshots)
 
-            # Volume aggregation: use AVERAGE (not sum) because volume represents
-            # stock/offer level, not traded volume. Summing would be meaningless.
-            volume_sum = sum(volumes) if volumes else None
-            volume_avg = (volume_sum / len(volumes)) if volumes else None
+            # Use the timestamp of the first snapshot of the day
+            day_timestamp = min(s['timestamp'] for s in day_snapshots)
 
-            points.append({
-                'timestamp': aggregate_timestamp,
-                'average_buy_price': (
-                    sum(buy_prices) / len(buy_prices) if buy_prices else Decimal('0')
-                ),
-                'average_sell_price': (
-                    sum(sell_prices) / len(sell_prices) if sell_prices else Decimal('0')
-                ),
-                # Use AVERAGE for charting (typical daily offer level)
-                'total_volume': volume_avg,
-                # Include sum as metadata for reference/tooltips
-                'volume_sum': volume_sum,
-                'spread_percentage': (
-                    sum(spreads) / len(spreads) if spreads else Decimal('0')
-                ),
-                'record_count': len(day_snapshots),
-                'has_volume_data': len(volumes) > 0,
+            results.append({
+                'timestamp': day_timestamp,
+                'average_buy_price': avg_buy,
+                'average_sell_price': avg_sell,
+                'total_volume': avg_volume,
+                'spread_percentage': avg_spread,
             })
 
-        return points
+        return results
 
     def _aggregate_weekly(self, snapshots: List[Dict]) -> List[Dict]:
         """
         Weekly aggregation - group by ISO week.
 
         Uses ISO week numbering where weeks start on Monday.
-        
+
         Calculates:
         - average_buy_price: Simple average of buy prices for the week
         - average_sell_price: Simple average of sell prices for the week
         - total_volume: AVERAGE of volumes for the week (not sum!)
         - spread_percentage: Average spread for the week
-        
+
         IMPORTANT - Volume semantics:
         In P2P snapshots, `total_volume` represents the STOCK/OFFER LEVEL
         (available volume in active ads at that moment), NOT traded volume.
-        
+
         Therefore:
         - Summing volumes across days would count the same stock multiple times
         - We use AVERAGE to show the typical offer level for the week
@@ -343,7 +307,7 @@ class AggregationService:
         points = []
         for week_key in sorted(by_week.keys()):
             week_snapshots = by_week[week_key]
-            
+
             # Calculate averages
             buy_prices = [
                 s['average_buy_price']
@@ -371,7 +335,7 @@ class AggregationService:
             year, week = week_key
             # ISO week 1 of a year may start in the previous calendar year
             first_day = datetime.strptime(f'{year}-W{week:02d}-1', '%G-W%V-%u')
-            aggregate_timestamp = first_day.replace(tzinfo=dt_timezone.utc)
+            aggregate_timestamp = first_day.replace(tzinfo=timezone.utc)
 
             # Volume aggregation: use AVERAGE (not sum) because volume represents
             # stock/offer level, not traded volume. Summing would be meaningless.
@@ -417,7 +381,7 @@ class AggregationService:
                 has_p2p = True
             elif quality >= OHLC_QUALITY_THRESHOLD:
                 has_ohlc = True
-            
+
             if has_p2p and has_ohlc:
                 break
 
@@ -447,7 +411,7 @@ class AggregationService:
                 'total_volume': float(p['total_volume']) if p['total_volume'] is not None else None,
                 'spread_percentage': float(p['spread_percentage']),
             }
-            
+
             # Include optional fields if present (for daily/weekly aggregations)
             if 'record_count' in p:
                 point['record_count'] = p['record_count']
@@ -456,7 +420,7 @@ class AggregationService:
             # volume_sum is the raw sum, useful for tooltips (total_volume is average)
             if 'volume_sum' in p:
                 point['volume_sum'] = float(p['volume_sum']) if p['volume_sum'] is not None else None
-                
+
             serialized.append(point)
         return serialized
 

@@ -119,7 +119,7 @@ class Command(BaseCommand):
                 masked = parts[0][:20] + '***@' + parts[-1]
             else:
                 masked = broker
-            
+
             if broker.startswith('redis://'):
                 self.stdout.write(self.style.SUCCESS(f'  CELERY_BROKER_URL: {masked}'))
             elif broker == 'django://':
@@ -265,7 +265,7 @@ class Command(BaseCommand):
                         if tasks:
                             self.stdout.write(f'      Tareas activas: {len(tasks)}')
                         else:
-                            self.stdout.write(f'      Sin tareas activas')
+                            self.stdout.write('      Sin tareas activas')
             else:
                 self.stdout.write(self.style.ERROR(
                     '  [ERROR] No hay workers respondiendo'

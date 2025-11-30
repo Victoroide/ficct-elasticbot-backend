@@ -53,7 +53,7 @@ class MidpointElasticityCalculator:
         |Ed| > 1: Elastic (quantity changes proportionally more than price)
         |Ed| < 1: Inelastic (quantity changes proportionally less than price)
         |Ed| ≈ 1: Unitary elastic (proportional changes)
-    
+
     Reliability checks:
         - Price must vary by at least 0.5% for meaningful results
         - Coefficients > |50| are flagged as unreliable
@@ -106,7 +106,7 @@ class MidpointElasticityCalculator:
         # Calculate percentage changes
         pct_change_price = abs(price_change / price_midpoint) * Decimal('100')
         pct_change_quantity_abs = abs(quantity_change / quantity_midpoint) * Decimal('100') if quantity_midpoint > 0 else Decimal('0')
-        
+
         # Log detailed input values for debugging
         logger.info(
             f"Elasticity calculation inputs: "
@@ -174,7 +174,7 @@ class MidpointElasticityCalculator:
         # RELIABILITY CHECK: Flag moderately extreme values
         is_reliable = abs_elasticity <= MAX_REASONABLE_ELASTICITY
         reliability_note = None
-        
+
         if not is_reliable:
             reliability_note = (
                 f"Elasticity |{abs_elasticity:.2f}| exceeds typical range (|{MAX_REASONABLE_ELASTICITY}|). "

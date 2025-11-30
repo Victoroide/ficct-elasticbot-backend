@@ -90,7 +90,7 @@ class CalculationResultSerializer(serializers.ModelSerializer):
     def get_classification_label(self, obj):
         """
         Return human-readable Spanish classification with reliability caveat.
-        
+
         The sign of elasticity coefficient indicates direction:
         - Negative Ed: Normal demand (price up -> quantity down)
         - Positive Ed: Giffen/Veblen goods or data artifact
@@ -109,7 +109,7 @@ class CalculationResultSerializer(serializers.ModelSerializer):
         # Add reliability warning if needed
         if not obj.is_reliable:
             return f"{base_label} (resultado no confiable)"
-        
+
         return base_label
 
 

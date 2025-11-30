@@ -111,14 +111,14 @@ class SnapshotViewSet(viewsets.ReadOnlyModelViewSet):
                     'total_volume': 175600.0,
                     'spread_percentage': 0.46,
                     'data_quality_score': 0.80,
-                    
+
                     'price_change_percentage': 0.00,
                     'price_change_direction': 'neutral',
                     'previous_price': 10.09,
                     'is_first_snapshot': False,
                     'time_gap_minutes': 32,
                     'time_gap_warning': False,
-                    
+
                     'market_premium_percentage': 45.01,
                     'bcb_official_rate': 6.96,
                     'bcb_rate_date': '2025-11-29',
@@ -153,7 +153,7 @@ class SnapshotViewSet(viewsets.ReadOnlyModelViewSet):
         # Use price change service to enrich the data
         service = PriceChangeService()
         enriched_data = service.enrich_snapshot_data(snapshot)
-        
+
         return Response(enriched_data)
 
     @extend_schema(
@@ -255,42 +255,42 @@ class SnapshotViewSet(viewsets.ReadOnlyModelViewSet):
 
         Returns date range, record count, and metadata for high-quality
         external OHLC data. Useful for frontend to set valid date picker bounds.
-        
+
         Only includes data with:
         - data_quality_score >= 0.95 (external API marker)
         - raw_response.source = 'external_ohlc_api'
         """
         # Quality threshold for external OHLC data
         QUALITY_THRESHOLD = 0.95
-        
+
         # Query external OHLC data only
         external_data = MarketSnapshot.objects.filter(
             data_quality_score__gte=QUALITY_THRESHOLD
         )
-        
+
         total_records = external_data.count()
-        
+
         if total_records == 0:
             return Response({
                 'error': 'No OHLC data available',
                 'detail': 'External OHLC data has not been imported. '
                          'Run: python manage.py import_ohlc_history --confirm'
             }, status=404)
-        
+
         first = external_data.order_by('timestamp').first()
         last = external_data.order_by('timestamp').last()
-        
+
         # Calculate span
         span = last.timestamp - first.timestamp
         span_hours = span.total_seconds() / 3600
         span_days = span_hours / 24
-        
+
         # Get unique timeframes from raw_response
         timeframes = set()
         for snap in external_data.only('raw_response')[:100]:  # Sample first 100
             if snap.raw_response and 'timeframe' in snap.raw_response:
                 timeframes.add(snap.raw_response['timeframe'])
-        
+
         return Response({
             'coverage_start': first.timestamp.isoformat(),
             'coverage_end': last.timestamp.isoformat(),
@@ -443,7 +443,7 @@ class SnapshotViewSet(viewsets.ReadOnlyModelViewSet):
         # Parse custom dates if provided
         start_date = None
         end_date = None
-        
+
         if start_date_str:
             try:
                 start_date = dateutil_parser.isoparse(start_date_str)

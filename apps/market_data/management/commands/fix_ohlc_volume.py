@@ -56,7 +56,7 @@ HOUR_VOLUME_MULTIPLIERS = {
     8: 0.3,   # 04:00 Bolivia - waking up
     9: 0.5,   # 05:00 Bolivia - early morning
     10: 0.7,  # 06:00 Bolivia - morning
-    11: 0.85, # 07:00 Bolivia - morning
+    11: 0.85,  # 07:00 Bolivia - morning
     12: 1.0,  # 08:00 Bolivia - business hours
     13: 1.2,  # 09:00 Bolivia - peak
     14: 1.3,  # 10:00 Bolivia - peak
@@ -101,7 +101,7 @@ class Command(BaseCommand):
         )
 
         total_count = ohlc_records.count()
-        
+
         self.stdout.write(self.style.NOTICE(f'\nFound {total_count} OHLC records to process'))
 
         if total_count == 0:
@@ -113,14 +113,14 @@ class Command(BaseCommand):
             data_quality_score__lt=OHLC_QUALITY_THRESHOLD,
             total_volume__gt=0
         ).aggregate(avg_volume=Avg('total_volume'))
-        
+
         self.avg_volume = p2p_avg['avg_volume'] or Decimal('250000')
         self.stdout.write(f'  Average P2P volume: {self.avg_volume:,.2f}')
 
         # Check for records with positive spread (wrong sign) or identical volume
-        from django.db.models import Q
+        # from django.db.models import Q
         wrong_spread = ohlc_records.filter(spread_percentage__gt=0).count()
-        
+
         self.stdout.write(f'  Records with positive spread (needs fix): {wrong_spread}')
         self.stdout.write(f'  All {total_count} OHLC records will be updated with varied volume')
 
@@ -159,20 +159,20 @@ class Command(BaseCommand):
 
         # Show sample records
         samples = ohlc_records.order_by('timestamp')[:5]
-        
+
         self.stdout.write(f'\nBase volume: {self.avg_volume:,.2f} (P2P average)')
         self.stdout.write('Volume will vary by hour (0.1x - 1.3x) + random (0.8x - 1.2x)')
         self.stdout.write('\nSample records to fix:')
         for record in samples:
             old_volume = record.total_volume
             old_spread = record.spread_percentage
-            
+
             # Calculate new values
             hour = record.timestamp.hour
             hour_mult = HOUR_VOLUME_MULTIPLIERS.get(hour, 1.0)
             estimated_volume = self.avg_volume * Decimal(str(hour_mult))
             new_spread = self._recalculate_spread(record)
-            
+
             self.stdout.write(f'\n  {record.timestamp} (hour {hour}, mult {hour_mult}x):')
             self.stdout.write(f'    Volume: {old_volume:,.2f} -> ~{estimated_volume:,.2f} (+/- 20%)')
             self.stdout.write(f'    Spread: {old_spread}% -> {new_spread}%')
@@ -204,10 +204,10 @@ class Command(BaseCommand):
                     # Calculate varied volume based on hour
                     hour = record.timestamp.hour
                     hour_multiplier = HOUR_VOLUME_MULTIPLIERS.get(hour, 1.0)
-                    
+
                     # Add random variation (+/- 20%)
                     random_factor = random.uniform(0.8, 1.2)
-                    
+
                     # Calculate final volume
                     varied_volume = self.avg_volume * Decimal(str(hour_multiplier)) * Decimal(str(random_factor))
                     record.total_volume = varied_volume.quantize(Decimal('0.01'))
@@ -262,15 +262,15 @@ class Command(BaseCommand):
     def _recalculate_spread(self, record) -> Decimal | None:
         """
         Recalculate spread_percentage from raw_response candle data.
-        
+
         The spread is calculated as:
             spread = (sell_price - buy_price) / midpoint * 100
-        
+
         This can be NEGATIVE if sell_price < buy_price, which is normal
         in P2P markets where:
         - buy_price = what buyers offer (you receive when selling)
         - sell_price = what sellers ask (you pay when buying)
-        
+
         Returns:
             New spread percentage (can be negative), or None if calculation not possible
         """

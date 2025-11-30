@@ -184,24 +184,21 @@ class BedrockClient:
     ) -> str:
         """Build clean user prompt with calculation context."""
         # Extract context values
-        method = context.get('method', 'Punto Medio')
-        period = context.get('period', 'última semana')
-        data_points = context.get('data_points', 50)
         start_date = context.get('start_date', 'fecha de inicio')
         end_date = context.get('end_date', 'fecha final')
-        
+
         # Check reliability from metadata if available
         reliability_info = context.get('reliability', {})
         is_reliable = reliability_info.get('is_reliable', True)
-        
+
         # Build clean user prompt
         prompt = f"""Contexto del cálculo de elasticidad:
 - Coeficiente de elasticidad: {elasticity:.2f}
 - Clasificación: {classification.upper()}
-- Método: {method}
+- Método: {context.get('method', 'Punto Medio')}
 - Periodo analizado: desde {start_date} hasta {end_date}
 - Ventana de agregación: por día
-- Puntos de datos usados: {data_points}
+- Puntos de datos usados: {context.get('data_points', 50)}
 - Contexto: mercado P2P de USDT/BOB en Bolivia, donde el USDT se usa como refugio de valor frente a la inflación y restricciones cambiarias
 {'- Nota: el cálculo fue marcado como de baja confiabilidad por poca variación en el precio o en la cantidad. Menciona esta cautela en tu interpretación.' if not is_reliable else ''}
 
@@ -224,10 +221,7 @@ Usa solo texto plano. No uses markdown, no muestres código, no expliques cómo 
         Returns plain text without markdown or code artifacts.
         """
         abs_e = abs(elasticity)
-        data_points = context.get('data_points', 50)
-        method = context.get('method', 'Punto Medio')
-        period = context.get('period', 'periodo analizado')
-        
+
         # Check if result is reliable
         is_unreliable = abs_e > 10
 

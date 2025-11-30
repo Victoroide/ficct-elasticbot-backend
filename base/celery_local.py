@@ -6,11 +6,12 @@ Usage:
     # Terminal 1 - Worker:
     set CELERY_BROKER_URL=filesystem://
     celery -A base worker --loglevel=info
-    
+
     # Terminal 2 - Beat:
     set CELERY_BROKER_URL=filesystem://
     celery -A base beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
 """
+from base.celery import app
 import os
 
 # Set broker to filesystem before importing celery app
@@ -23,7 +24,6 @@ os.environ['CELERY_BROKER_URL'] = 'filesystem://'
 os.environ['CELERY_RESULT_BACKEND'] = 'django-db'
 
 # Now import the app
-from base.celery import app
 
 # Configure filesystem transport
 app.conf.broker_transport_options = {

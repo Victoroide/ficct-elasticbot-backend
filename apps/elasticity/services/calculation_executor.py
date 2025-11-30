@@ -10,7 +10,7 @@ This separation allows:
 
 Usage:
     from apps.elasticity.services import execute_calculation
-    
+
     # Execute calculation (returns result dict)
     result = execute_calculation(calculation_id)
 """
@@ -39,13 +39,13 @@ EXTERNAL_API_QUALITY_THRESHOLD = 0.95
 def execute_calculation(calculation_id: str) -> dict:
     """
     Execute elasticity calculation synchronously.
-    
+
     This is the core calculation logic extracted from the Celery task.
     Can be called directly for sync mode or from Celery task for async mode.
-    
+
     Args:
         calculation_id: UUID string of the ElasticityCalculation record
-        
+
     Returns:
         Dict with calculation results:
         - calculation_id: str
@@ -83,7 +83,7 @@ def execute_calculation(calculation_id: str) -> dict:
         ).order_by('timestamp')
 
         snapshot_count = snapshots.count()
-        
+
         logger.info(
             f"Query executed: {start_date_utc.date()} to {end_date_utc.date()}, "
             f"quality >= {EXTERNAL_API_QUALITY_THRESHOLD}, found {snapshot_count} snapshots",
@@ -92,10 +92,10 @@ def execute_calculation(calculation_id: str) -> dict:
                 'snapshot_count': snapshot_count
             }
         )
-        
+
         # Determine minimum required data points
         min_required = (
-            MIN_DATA_POINTS_REGRESSION if calculation.method == 'REGRESSION' 
+            MIN_DATA_POINTS_REGRESSION if calculation.method == 'REGRESSION'
             else MIN_DATA_POINTS_MIDPOINT
         )
 
@@ -187,7 +187,7 @@ def execute_calculation(calculation_id: str) -> dict:
         }
 
         calculation.average_data_quality = calculation.calculation_metadata['data_quality']['avg_quality']
-        
+
         # Save all computed fields
         calculation.save(update_fields=[
             'elasticity_coefficient',
@@ -252,7 +252,7 @@ def _fail_calculation(calculation, error_message: str):
     calculation.error_message = error_message
     calculation.completed_at = timezone.now()
     calculation.save(update_fields=['status', 'error_message', 'completed_at', 'updated_at'])
-    
+
     logger.warning(
         f"Calculation {calculation.id} FAILED: {error_message}",
         extra={'calculation_id': str(calculation.id)}

@@ -102,7 +102,7 @@ def calculate_elasticity_async(self, calculation_id: str):
         ).order_by('timestamp')
 
         snapshot_count = snapshots.count()
-        
+
         logger.info(
             f"Query executed: {start_date_utc.date()} to {end_date_utc.date()}, "
             f"quality >= {EXTERNAL_API_QUALITY_THRESHOLD}, found {snapshot_count} snapshots",
@@ -114,10 +114,10 @@ def calculate_elasticity_async(self, calculation_id: str):
                 'snapshot_count': snapshot_count
             }
         )
-        
+
         # Determine minimum required data points based on method
         min_required = (
-            MIN_DATA_POINTS_REGRESSION if calculation.method == 'REGRESSION' 
+            MIN_DATA_POINTS_REGRESSION if calculation.method == 'REGRESSION'
             else MIN_DATA_POINTS_MIDPOINT
         )
 
@@ -199,7 +199,7 @@ def calculate_elasticity_async(self, calculation_id: str):
         }
 
         calculation.average_data_quality = calculation.calculation_metadata['data_quality']['avg_quality']
-        
+
         # Save all computed fields before marking completed
         calculation.save(update_fields=[
             'elasticity_coefficient',
@@ -251,24 +251,24 @@ def calculate_elasticity_async(self, calculation_id: str):
         # Only retry for transient errors, not business logic failures
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
-        
+
         return {'calculation_id': calculation_id, 'status': 'FAILED', 'error': str(exc)}
 
 
 def _ensure_utc(dt):
     """
     Ensure a datetime is timezone-aware and converted to UTC.
-    
+
     This handles the case where dates come in without timezone info
     or in a different timezone than UTC.
     """
     if dt is None:
         return None
-    
+
     # If naive, assume it's in the default timezone and make it aware
     if timezone.is_naive(dt):
         dt = timezone.make_aware(dt)
-    
+
     # Convert to UTC for consistent database querying
     return dt.astimezone(dt_timezone.utc)
 
@@ -276,14 +276,14 @@ def _ensure_utc(dt):
 def _fail_calculation(calculation, error_message: str):
     """
     Mark a calculation as failed with a descriptive error message.
-    
+
     This ensures failed calculations are never left in PENDING/PROCESSING state.
     """
     calculation.status = 'FAILED'
     calculation.error_message = error_message
     calculation.completed_at = timezone.now()
     calculation.save(update_fields=['status', 'error_message', 'completed_at', 'updated_at'])
-    
+
     logger.warning(
         f"Calculation {calculation.id} marked as FAILED: {error_message}",
         extra={'calculation_id': str(calculation.id), 'error_message': error_message}

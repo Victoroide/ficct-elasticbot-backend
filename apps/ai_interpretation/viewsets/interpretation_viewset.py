@@ -138,14 +138,14 @@ class InterpretationViewSet(viewsets.ViewSet):
         start_str = calculation.start_date.strftime('%d/%m/%Y')
         end_str = calculation.end_date.strftime('%d/%m/%Y')
         period = f"{start_str} - {end_str}"
-        
+
         # Map method to Spanish
         method_names = {
             'MIDPOINT': 'Punto Medio',
             'REGRESSION': 'Regresion Log-Log'
         }
         method_display = method_names.get(calculation.method, calculation.method)
-        
+
         context = {
             'method': method_display,
             'data_points': calculation.data_points_used or 0,
@@ -154,7 +154,7 @@ class InterpretationViewSet(viewsets.ViewSet):
             'start_date': calculation.start_date.isoformat(),
             'end_date': calculation.end_date.isoformat(),
         }
-        
+
         # Add reliability information from calculation metadata
         if calculation.calculation_metadata:
             reliability = calculation.calculation_metadata.get('reliability', {})

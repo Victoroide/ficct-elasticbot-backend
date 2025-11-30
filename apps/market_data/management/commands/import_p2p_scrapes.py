@@ -107,7 +107,7 @@ class Command(BaseCommand):
             if r.get('platform_id') == 1 and r.get('pair_id') == 1
         ]
         filtered_count = len(filtered_records)
-        
+
         self.stdout.write(f'Filtered records (Binance + USDT/BOB): {filtered_count}')
 
         if filtered_count == 0:
@@ -126,7 +126,7 @@ class Command(BaseCommand):
         if timestamps:
             timestamps.sort()
             self.stdout.write(self.style.SUCCESS(
-                f'\nTime range to import:'
+                '\nTime range to import:'
             ))
             self.stdout.write(f'  Start: {timestamps[0]}')
             self.stdout.write(f'  End:   {timestamps[-1]}')
@@ -137,7 +137,7 @@ class Command(BaseCommand):
         existing_p2p = MarketSnapshot.objects.filter(
             data_quality_score=P2P_SCRAPE_QUALITY_SCORE
         ).count()
-        
+
         existing_ohlc = MarketSnapshot.objects.filter(
             data_quality_score__gte=EXTERNAL_OHLC_QUALITY_THRESHOLD
         ).count()
@@ -180,7 +180,6 @@ class Command(BaseCommand):
         self.stdout.write(self.style.NOTICE('=' * 60))
 
         would_create = 0
-        would_update = 0
         would_skip_ohlc = 0
         would_skip_existing = 0
         parse_errors = 0

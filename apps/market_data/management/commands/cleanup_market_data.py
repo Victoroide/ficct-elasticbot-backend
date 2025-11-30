@@ -10,9 +10,8 @@ Usage:
 
 IMPORTANT: This is a destructive operation. Run --dry-run first to verify.
 """
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.db import transaction
-
 from apps.market_data.models import MarketSnapshot
 
 
@@ -60,23 +59,23 @@ class Command(BaseCommand):
         # Identify external API records
         external_records = []
         non_external_records = []
-        
+
         for snap in MarketSnapshot.objects.all():
             is_external = (
-                snap.raw_response and 
-                snap.raw_response.get('source') == 'external_ohlc_api'
+                snap.raw_response
+                and snap.raw_response.get('source') == 'external_ohlc_api'
             )
             if is_external:
                 external_records.append(snap)
             else:
                 non_external_records.append(snap)
 
-        self.stdout.write(f'\n📊 Data Breakdown:')
+        self.stdout.write('\n📊 Data Breakdown:')
         self.stdout.write(f'  ✓ External API records (keep): {len(external_records)}')
         self.stdout.write(f'  ✗ Other records (delete): {len(non_external_records)}')
 
         if non_external_records:
-            self.stdout.write(f'\n🗑️  Records to delete:')
+            self.stdout.write('\n🗑️  Records to delete:')
             for snap in non_external_records[:5]:
                 source = snap.raw_response.get('source', 'unknown') if snap.raw_response else 'no raw_response'
                 self.stdout.write(f'    - {snap.timestamp} (quality={snap.data_quality_score}, source={source})')
@@ -92,7 +91,7 @@ class Command(BaseCommand):
 
             # Show date range
             timestamps = [s.timestamp for s in external_records]
-            self.stdout.write(f'\n📅 External data range:')
+            self.stdout.write('\n📅 External data range:')
             self.stdout.write(f'    First: {min(timestamps)}')
             self.stdout.write(f'    Last:  {max(timestamps)}')
 
@@ -106,7 +105,7 @@ class Command(BaseCommand):
 
         # Execute cleanup
         self.stdout.write(self.style.NOTICE('\n🔧 Executing cleanup...'))
-        
+
         with transaction.atomic():
             # Delete non-external records
             if non_external_records:
@@ -133,7 +132,7 @@ class Command(BaseCommand):
         # Verify all records are from external API
         all_external = True
         all_correct_quality = True
-        
+
         for snap in MarketSnapshot.objects.all():
             if not (snap.raw_response and snap.raw_response.get('source') == 'external_ohlc_api'):
                 all_external = False

@@ -9,27 +9,28 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class Command(BaseCommand):
     help = 'Run Binance P2P scraper manually (fallback for Celery issues)'
-    
+
     def add_arguments(self, parser):
         parser.add_argument(
             '--verbose',
             action='store_true',
             help='Enable verbose logging',
         )
-    
+
     def handle(self, *args, **options):
         start_time = timezone.now()
         self.stdout.write(f'[{start_time}] Starting manual Binance P2P scraper...')
-        
+
         if options['verbose']:
             self.stdout.write('Using direct task execution (bypassing Celery)')
-        
+
         try:
             # Execute the scraper directly without Celery
             result = fetch_binance_data()
-            
+
             if result.get('status') == 'success':
                 self.stdout.write(
                     self.style.SUCCESS(
@@ -55,7 +56,7 @@ class Command(BaseCommand):
                         f"ERROR: Scraper failed with status: {result.get('status')}"
                     )
                 )
-                
+
         except Exception as e:
             self.stdout.write(
                 self.style.ERROR(
@@ -65,6 +66,6 @@ class Command(BaseCommand):
             if options['verbose']:
                 import traceback
                 traceback.print_exc()
-        
+
         execution_time = timezone.now() - start_time
         self.stdout.write(f'Execution completed in {execution_time.total_seconds():.2f} seconds')

@@ -30,7 +30,7 @@ def fetch_binance_data(self):
 
     Scheduled to run every 30 minutes via Celery Beat.
     Creates MarketSnapshot record with current prices and volumes.
-    
+
     PROTECTIONS:
     - Redis lock prevents concurrent execution
     - Minimum interval check prevents spam (15 min between snapshots)
@@ -59,7 +59,7 @@ def fetch_binance_data(self):
         # =====================================================================
         min_interval = timedelta(minutes=MIN_SNAPSHOT_INTERVAL_MINUTES)
         recent_cutoff = start_time - min_interval
-        
+
         recent_snapshot = MarketSnapshot.objects.filter(
             timestamp__gte=recent_cutoff,
             data_quality_score__lt=0.95  # Only check P2P data, not OHLC

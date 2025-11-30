@@ -27,7 +27,7 @@ Usage:
 
 Timeframe options:
     10m  →  200 points = ~33 hours
-    30m  →  200 points = ~4 days  
+    30m  →  200 points = ~4 days
     1h   →  200 points = ~8 days (default, recommended)
 
 Data is stored permanently and deduplicated by timestamp.
@@ -56,12 +56,12 @@ class Command(BaseCommand):
     VALID_TIMEFRAMES = ['10m', '30m', '1h']
     VALID_POINTS = [50, 100, 200]
     REQUEST_TIMEOUT = 30  # seconds
-    
+
     # Coverage estimates for documentation
     COVERAGE_HOURS = {
         '10m': lambda pts: pts * 10 / 60,   # 200 pts = 33 hours
         '30m': lambda pts: pts * 30 / 60,   # 200 pts = 100 hours
-        '1h':  lambda pts: pts * 1,         # 200 pts = 200 hours
+        '1h': lambda pts: pts * 1,         # 200 pts = 200 hours
     }
 
     def add_arguments(self, parser):
@@ -100,11 +100,11 @@ class Command(BaseCommand):
         confirm = options['confirm']
         dry_run = options['dry_run']
         force = options['force']
-        
+
         # Store timeframe and points as instance variables for use in other methods
         self.timeframe = options['timeframe']
         self.points = options['points']
-        
+
         # Calculate estimated coverage
         coverage_hours = self.COVERAGE_HOURS[self.timeframe](self.points)
         coverage_days = coverage_hours / 24
@@ -127,14 +127,14 @@ class Command(BaseCommand):
         existing_count = MarketSnapshot.objects.filter(
             data_quality_score=EXTERNAL_API_QUALITY_SCORE
         ).count()
-        
+
         first = MarketSnapshot.objects.filter(
             data_quality_score=EXTERNAL_API_QUALITY_SCORE
         ).order_by('timestamp').first()
         last = MarketSnapshot.objects.filter(
             data_quality_score=EXTERNAL_API_QUALITY_SCORE
         ).order_by('timestamp').last()
-        
+
         self.stdout.write(self.style.NOTICE('\n' + '=' * 60))
         self.stdout.write(self.style.NOTICE('Current Database State'))
         self.stdout.write(self.style.NOTICE('=' * 60))
@@ -143,7 +143,7 @@ class Command(BaseCommand):
             self.stdout.write(f'  Current coverage: {first.timestamp.date()} to {last.timestamp.date()}')
             span_days = (last.timestamp - first.timestamp).days
             self.stdout.write(f'  Span: {span_days} days')
-        
+
         self.stdout.write('')
         self.stdout.write(self.style.WARNING('Planned Import:'))
         self.stdout.write(f'  Timeframe: {self.timeframe}')
@@ -263,7 +263,7 @@ class Command(BaseCommand):
             self.stdout.write(f'  Total MarketSnapshot records: {total}')
             if first and last:
                 self.stdout.write(f'  Date range: {first.timestamp} to {last.timestamp}')
-            
+
             self.stdout.write('')
             self.stdout.write(self.style.SUCCESS('✅ Import completed successfully!'))
             self.stdout.write('')
@@ -306,7 +306,7 @@ class Command(BaseCommand):
     def _fetch_ohlc_data(self, api_url: str) -> dict | None:
         """
         Fetch OHLC data from external API.
-        
+
         Returns parsed JSON data dict or None on failure.
         """
         params = {
@@ -368,7 +368,7 @@ class Command(BaseCommand):
     def _transform_candle(self, buy_candle: dict, sell_candle: dict) -> dict | None:
         """
         Transform buy and sell OHLC candles into MarketSnapshot fields.
-        
+
         Returns dict of MarketSnapshot field values or None if invalid.
         """
         try:
@@ -383,8 +383,6 @@ class Command(BaseCommand):
             # Extract prices - use close price as representative
             buy_close = buy_candle.get('close')
             sell_close = sell_candle.get('close')
-            sell_high = sell_candle.get('high')
-            sell_low = sell_candle.get('low')
 
             if buy_close is None or sell_close is None:
                 self.stdout.write(self.style.WARNING(
@@ -423,7 +421,7 @@ class Command(BaseCommand):
             # DO NOT create fake volume from price range - that was a bug!
             # ================================================================
             import random
-            
+
             # Hour-based multipliers (UTC hours)
             hour_multipliers = {
                 0: 0.4, 1: 0.3, 2: 0.2, 3: 0.15, 4: 0.1, 5: 0.1,
@@ -431,7 +429,7 @@ class Command(BaseCommand):
                 12: 1.0, 13: 1.2, 14: 1.3, 15: 1.2, 16: 1.0, 17: 0.9,
                 18: 1.1, 19: 1.2, 20: 1.1, 21: 0.9, 22: 0.7, 23: 0.5,
             }
-            
+
             base_volume = Decimal('250000.00')
             hour = timestamp.hour
             hour_mult = Decimal(str(hour_multipliers.get(hour, 1.0)))

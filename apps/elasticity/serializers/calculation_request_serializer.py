@@ -18,7 +18,7 @@ class CalculationRequestSerializer(serializers.Serializer):
         "end_date": "2025-11-18T23:59:59Z",
         "window_size": "daily"
     }
-    
+
     Note: All dates are normalized to UTC for consistent database querying.
     """
 
@@ -45,18 +45,18 @@ class CalculationRequestSerializer(serializers.Serializer):
     def _normalize_to_utc(self, dt):
         """
         Normalize a datetime to UTC timezone.
-        
+
         Handles:
         - Naive datetimes (assumes default timezone)
         - Aware datetimes in any timezone (converts to UTC)
         """
         if dt is None:
             return None
-        
+
         # If naive, make it aware using the default timezone
         if timezone.is_naive(dt):
             dt = timezone.make_aware(dt)
-        
+
         # Convert to UTC
         return dt.astimezone(pytz.UTC)
 

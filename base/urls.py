@@ -25,10 +25,10 @@ def health_check_detailed(request):
     Use for monitoring dashboards, not for load balancer probes.
     """
     from utils.health import get_full_health_status
-    
+
     status = get_full_health_status()
     http_status = 200 if status['healthy'] else 503
-    
+
     return JsonResponse(status, status=http_status)
 
 

@@ -155,7 +155,7 @@ class Command(BaseCommand):
     def _calculate_normal_daily_volume(self):
         """
         Estimate V_normal_day based on current data averages and valid snapshots.
-        
+
         Uses a blend of:
         1. Current average daily volume (what the data shows now)
         2. Valid snapshot volumes (what the scraper captures normally)

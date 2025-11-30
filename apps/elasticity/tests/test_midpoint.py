@@ -288,7 +288,7 @@ class TestMidpointElasticityCalculator:
     def test_insufficient_price_variation_raises_error(self):
         """
         Price variation below 1% should fail.
-        
+
         USDT/BOB is very stable; tiny price moves produce unreliable elasticity.
         """
         with pytest.raises(ValueError, match="Price variation too small"):
@@ -302,7 +302,7 @@ class TestMidpointElasticityCalculator:
     def test_extreme_elasticity_raises_error(self):
         """
         Elasticity > 20 should fail as unreportable.
-        
+
         Such extreme values indicate data issues, not real demand behavior.
         """
         with pytest.raises(ValueError, match="unrealistically high"):
