@@ -49,7 +49,18 @@ services:
       - .env
     environment:
       - DEBUG=True
+      # Redis configuration (built from components in settings.py)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_USER=default
+      - REDIS_PASSWORD=
+      # Override any external Redis URL
+      - REDIS_URL=
+      # Force Celery to use internal Redis
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ELASTICITY_ASYNC_ENABLED=True
+      - REDIS_CACHE_ENABLED=True
     depends_on:
       - redis
       - worker

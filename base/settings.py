@@ -141,9 +141,55 @@ CORS_ALLOWED_ORIGINS = env.list(
 )
 CORS_ALLOW_CREDENTIALS = True
 
-# Celery Configuration - Database broker for reliability (no Redis dependency)
-CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='django://')
-CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='django-db')
+# ==============================================================================
+# REDIS CONFIGURATION
+# ==============================================================================
+# Build Redis URL from environment variables (Railway private network)
+# Priority: REDIS_URL > constructed from individual vars > None
+#
+# For Railway private networking:
+#   REDIS_HOST = redis.railway.internal (private domain)
+#   REDIS_PORT = 6379
+#   REDIS_USER = default
+#   REDIS_PASSWORD = your-password
+# ==============================================================================
+def _build_redis_url():
+    """Build Redis URL from environment variables."""
+    # First check if full URL is provided
+    redis_url = env('REDIS_URL', default=None)
+    if redis_url:
+        return redis_url
+    
+    # Build from individual components
+    host = env('REDIS_HOST', default=env('REDISHOST', default=None))
+    if not host:
+        return None
+    
+    port = env('REDIS_PORT', default=env('REDISPORT', default='6379'))
+    user = env('REDIS_USER', default=env('REDISUSER', default='default'))
+    password = env('REDIS_PASSWORD', default=env('REDISPASSWORD', default=''))
+    
+    if password:
+        return f"redis://{user}:{password}@{host}:{port}/0"
+    return f"redis://{host}:{port}/0"
+
+REDIS_URL = _build_redis_url()
+
+# ==============================================================================
+# CELERY CONFIGURATION
+# ==============================================================================
+# Uses Redis as broker when available, otherwise falls back to django-db
+# Result backend always uses django-db for reliability
+# ==============================================================================
+if REDIS_URL:
+    CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=REDIS_URL)
+    # Use Redis DB 0 for broker, DB 1 for results (if using Redis for results)
+    CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='django-db')
+else:
+    # Fallback when Redis is not configured
+    CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='django://')
+    CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='django-db')
+
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
@@ -151,6 +197,11 @@ CELERY_TIMEZONE = 'UTC'  # Use UTC for consistent task scheduling
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_RESULT_EXTENDED = True
+
+# Connection retry settings for Redis reliability
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_RETRY = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = 10
 
 # Task reliability settings - prevent zombie tasks
 CELERY_TASK_ACKS_LATE = True  # Acknowledge task after completion, not before
@@ -163,43 +214,42 @@ CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 # ELASTICITY CALCULATION MODE
 # ==============================================================================
 # When True: Use Celery async tasks (requires Redis to be running)
-# When False: Execute calculations synchronously in the request (no Redis needed)
+# When False: Execute calculations synchronously in the request
 #
-# Set to False if:
-# - Redis is not available or unstable
-# - You want guaranteed calculation completion (at cost of request latency)
-# - Development/testing without Redis
+# Default behavior:
+# - If Redis is configured: async mode (True) with automatic sync fallback
+# - If no Redis: sync mode (False)
 #
-# Trade-offs:
-# - Async (True): Non-blocking requests, but fails silently if Redis is down
-# - Sync (False): Blocking requests (5-15s), but always works
+# The async mode has a built-in fallback: if Celery/Redis fails during
+# task enqueue, it automatically executes synchronously.
 # ==============================================================================
-ELASTICITY_ASYNC_ENABLED = env.bool('ELASTICITY_ASYNC_ENABLED', default=False)
+ELASTICITY_ASYNC_ENABLED = env.bool(
+    'ELASTICITY_ASYNC_ENABLED',
+    default=bool(REDIS_URL)  # Auto-enable if Redis is configured
+)
 
 # ==============================================================================
 # CACHE CONFIGURATION
 # ==============================================================================
-# Default: LocMemCache (no Redis needed)
-# Set REDIS_CACHE_ENABLED=True to use Redis (requires Redis server running)
-#
-# LocMemCache is sufficient for:
-# - Single-process deployments
-# - Development and testing
-# - When Redis is unavailable
-#
-# Use Redis when:
-# - Multiple workers need to share cache
-# - Cache persistence across restarts is needed
+# Uses Redis cache when available, falls back to LocMemCache
+# Redis cache is enabled automatically when REDIS_URL is configured
+# Override with REDIS_CACHE_ENABLED=False to force LocMemCache
 # ==============================================================================
-REDIS_CACHE_ENABLED = env.bool('REDIS_CACHE_ENABLED', default=False)
+REDIS_CACHE_ENABLED = env.bool('REDIS_CACHE_ENABLED', default=bool(REDIS_URL))
 
-if REDIS_CACHE_ENABLED:
+if REDIS_CACHE_ENABLED and REDIS_URL:
+    # Use Redis DB 1 for cache (separate from Celery broker on DB 0)
+    cache_url = REDIS_URL.replace('/0', '/1') if '/0' in REDIS_URL else REDIS_URL
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            'LOCATION': env('REDIS_URL', default='redis://localhost:6379/1'),
+            'LOCATION': cache_url,
             'KEY_PREFIX': 'elasticbot',
             'TIMEOUT': env.int('CACHE_TTL_SECONDS', default=900),
+            'OPTIONS': {
+                'socket_connect_timeout': 5,
+                'socket_timeout': 5,
+            }
         }
     }
 else:
@@ -210,6 +260,17 @@ else:
             'LOCATION': 'elasticbot-cache',
         }
     }
+
+# Log Redis configuration status
+import logging
+_settings_logger = logging.getLogger('django.settings')
+if REDIS_URL:
+    # Mask password in log
+    _masked_url = REDIS_URL.split('@')[-1] if '@' in REDIS_URL else REDIS_URL
+    _settings_logger.info(f"Redis configured: ...@{_masked_url}")
+    _settings_logger.info(f"Celery async: {ELASTICITY_ASYNC_ENABLED}, Redis cache: {REDIS_CACHE_ENABLED}")
+else:
+    _settings_logger.info("Redis not configured, using fallback modes (sync execution, local cache)")
 
 # AWS Configuration
 AWS_ACCESS_KEY_ID = env('AWS_ACCESS_KEY_ID', default='')

@@ -21,9 +21,19 @@ services:
       - .env
     environment:
       - DEBUG=False
-      - REDIS_URL=redis://redis:6379/0
+      # Redis configuration (built from components in settings.py)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_USER=default
+      - REDIS_PASSWORD=
+      # Override any external Redis URL
+      - REDIS_URL=
+      # Force Celery to use internal Redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ELASTICITY_ASYNC_ENABLED=True
+      - REDIS_CACHE_ENABLED=True
+      # Django configuration
       - ALLOWED_HOSTS=localhost,127.0.0.1,elasticbot-web
       - CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
     volumes:
@@ -56,9 +66,18 @@ services:
       - .env
     environment:
       - DEBUG=False
-      - REDIS_URL=redis://redis:6379/0
+      # Redis configuration (built from components in settings.py)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_USER=default
+      - REDIS_PASSWORD=
+      # Override any external Redis URL
+      - REDIS_URL=
+      # Force Celery to use internal Redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ELASTICITY_ASYNC_ENABLED=True
+      - REDIS_CACHE_ENABLED=True
     volumes:
       - logs_volume:/app/logs
     depends_on:
@@ -89,9 +108,18 @@ services:
       - .env
     environment:
       - DEBUG=False
-      - REDIS_URL=redis://redis:6379/0
+      # Redis configuration (built from components in settings.py)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_USER=default
+      - REDIS_PASSWORD=
+      # Override any external Redis URL
+      - REDIS_URL=
+      # Force Celery to use internal Redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - ELASTICITY_ASYNC_ENABLED=True
+      - REDIS_CACHE_ENABLED=True
     volumes:
       - logs_volume:/app/logs
     depends_on:

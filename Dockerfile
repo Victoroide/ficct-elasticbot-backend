@@ -52,6 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
     procps \
+    netcat-traditional \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -79,7 +80,8 @@ USER elasticbot
 RUN python manage.py collectstatic --noinput --clear 2>/dev/null || true
 
 # Health check for container orchestrators
-HEALTHCHECK --interval=15s --timeout=10s --start-period=30s --retries=5 \
+# Uses simple endpoint for load balancer probes (no dependencies)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health/ || exit 1
 
 # Expose port

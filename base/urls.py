@@ -19,9 +19,23 @@ def health_check(request):
     })
 
 
+def health_check_detailed(request):
+    """
+    Detailed health check including Redis, Cache, and Celery status.
+    Use for monitoring dashboards, not for load balancer probes.
+    """
+    from utils.health import get_full_health_status
+    
+    status = get_full_health_status()
+    http_status = 200 if status['healthy'] else 503
+    
+    return JsonResponse(status, status=http_status)
+
+
 urlpatterns = [
-    # Health check (no dependencies - for Docker/K8s probes)
-    path('health/', health_check, name='health-check'),
+    # Health checks
+    path('health/', health_check, name='health-check'),  # Simple - for load balancer probes
+    path('health/detailed/', health_check_detailed, name='health-check-detailed'),  # Full status
 
     path('admin/', admin.site.urls),
 
