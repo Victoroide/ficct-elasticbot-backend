@@ -154,7 +154,11 @@ def execute_calculation(calculation_id: str) -> dict:
         if 'standard_error' in result:
             calculation.standard_error = Decimal(str(result['standard_error']))
 
-        # Store metadata including reliability info
+        # Store reliability at top level for easy API access
+        calculation.is_reliable = result.get('is_reliable', True)
+        calculation.reliability_note = result.get('reliability_note')
+
+        # Store detailed metadata
         calculation.calculation_metadata = {
             'method_details': result.get('metadata', {}),
             'data_quality': {
@@ -167,12 +171,18 @@ def execute_calculation(calculation_id: str) -> dict:
                 'end_date_utc': end_date_utc.isoformat(),
                 'snapshots_found': snapshot_count,
             },
-            'reliability': {
-                'is_reliable': result.get('is_reliable', True),
-                'note': result.get('reliability_note'),
+            'price_quantity_changes': {
                 'percentage_change_price': result.get('percentage_change_price'),
                 'percentage_change_quantity': result.get('percentage_change_quantity'),
+                'price_change': result.get('price_change'),
+                'quantity_change': result.get('quantity_change'),
             },
+            'volume_disclaimer': (
+                "Note: 'quantity' is derived from P2P total_volume (advertised offers), "
+                "not actual traded volume. This is a proxy for market activity, "
+                "not pure demand. High elasticity values may reflect liquidity "
+                "fluctuations rather than true price responsiveness."
+            ),
             'execution_mode': 'sync',
         }
 
@@ -187,6 +197,8 @@ def execute_calculation(calculation_id: str) -> dict:
             'confidence_interval_upper',
             'r_squared',
             'standard_error',
+            'is_reliable',
+            'reliability_note',
             'calculation_metadata',
             'average_data_quality',
             'updated_at'

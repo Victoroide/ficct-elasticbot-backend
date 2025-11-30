@@ -10,8 +10,10 @@ IMPORTANT NOTES ON P2P MARKET DATA:
 - This can produce misleading elasticity coefficients
 
 THRESHOLDS:
-- Minimum price variation: 0.5% (smaller variations give unreliable results)
-- Maximum reasonable elasticity: |50| (larger values flagged as unreliable)
+- Minimum price variation: 1% (smaller variations give unreliable results)
+- Minimum quantity variation: 1% (prevents edge cases)
+- Maximum reasonable elasticity: |10| (larger values flagged as unreliable)
+- Maximum reportable elasticity: |20| (larger values cause FAILED status)
 """
 from decimal import Decimal
 from typing import Dict, List
@@ -20,13 +22,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Minimum percentage price change required for reliable elasticity
-MIN_PRICE_VARIATION_PCT = Decimal('0.5')  # 0.5%
+# P2P markets are relatively stable; 1% minimum prevents division explosion
+MIN_PRICE_VARIATION_PCT = Decimal('1.0')  # 1%
+
+# Minimum quantity variation (prevents near-zero numerator edge cases)
+MIN_QUANTITY_VARIATION_PCT = Decimal('1.0')  # 1%
 
 # Maximum reasonable elasticity coefficient (larger = unreliable)
-# For typical markets: |Ed| < 5 is normal
-# For P2P markets with volatile volume: |Ed| < 10 is acceptable
-# Anything > 10 likely indicates volume changes driven by non-price factors
+# Standard economics: |Ed| typically 0.1 to 5
+# P2P markets with noise: |Ed| up to 10 is interpretable
+# Above 10: likely noise, not real elasticity
 MAX_REASONABLE_ELASTICITY = Decimal('10')
+
+# Absolute maximum - beyond this, refuse to report a number
+# If |Ed| > 20, the calculation is meaningless
+MAX_REPORTABLE_ELASTICITY = Decimal('20')
 
 
 class MidpointElasticityCalculator:
@@ -95,6 +105,7 @@ class MidpointElasticityCalculator:
 
         # Calculate percentage changes
         pct_change_price = abs(price_change / price_midpoint) * Decimal('100')
+        pct_change_quantity_abs = abs(quantity_change / quantity_midpoint) * Decimal('100') if quantity_midpoint > 0 else Decimal('0')
         
         # Log detailed input values for debugging
         logger.info(
@@ -102,21 +113,35 @@ class MidpointElasticityCalculator:
             f"P_initial={price_initial:.4f}, P_final={price_final:.4f}, "
             f"ΔP={price_change:.4f}, ΔP%={pct_change_price:.2f}%, "
             f"Q_initial={quantity_initial:.2f}, Q_final={quantity_final:.2f}, "
-            f"ΔQ={quantity_change:.2f}"
+            f"ΔQ={quantity_change:.2f}, ΔQ%={pct_change_quantity_abs:.2f}%"
         )
 
-        # VALIDATION: Check minimum price variation
-        if pct_change_price < MIN_PRICE_VARIATION_PCT:
+        # VALIDATION 1: Check for zero/near-zero price change
+        if price_change == 0:
             raise ValueError(
-                f"Insufficient price variation: {pct_change_price:.2f}% "
-                f"(minimum required: {MIN_PRICE_VARIATION_PCT}%). "
-                f"Price range {price_initial:.4f} to {price_final:.4f} is too narrow "
-                f"for meaningful elasticity calculation."
+                "Price unchanged during period - elasticity is undefined. "
+                "Select a longer time window or different dates."
             )
 
-        # Check for zero price change (shouldn't happen after above check, but safety)
-        if price_change == 0:
-            raise ValueError("Price change cannot be zero - elasticity undefined")
+        # VALIDATION 2: Check minimum price variation
+        if pct_change_price < MIN_PRICE_VARIATION_PCT:
+            raise ValueError(
+                f"Price variation too small: {pct_change_price:.2f}% "
+                f"(minimum: {MIN_PRICE_VARIATION_PCT}%). "
+                f"USDT/BOB price is very stable ({price_initial:.4f} to {price_final:.4f}). "
+                f"Elasticity cannot be calculated meaningfully with such small price movement. "
+                f"Try a longer time window or different dates."
+            )
+
+        # VALIDATION 3: Check minimum quantity variation
+        # Exception: ΔQ = 0 exactly is valid (perfectly inelastic demand, Ed = 0)
+        # Only reject near-zero but non-zero ΔQ which causes unstable ratios
+        if quantity_change != 0 and pct_change_quantity_abs < MIN_QUANTITY_VARIATION_PCT and quantity_midpoint > 0:
+            raise ValueError(
+                f"Volume variation too small: {pct_change_quantity_abs:.2f}% "
+                f"(minimum: {MIN_QUANTITY_VARIATION_PCT}%). "
+                f"Volume change is near-zero but not zero - result would be unstable."
+            )
 
         # Calculate percentage changes using midpoint method
         pct_change_quantity = (quantity_change / quantity_midpoint) * Decimal('100')
@@ -136,16 +161,26 @@ class MidpointElasticityCalculator:
         else:
             classification = 'unitary'
 
-        # RELIABILITY CHECK: Flag extreme values
+        # VALIDATION 4: Refuse to report absurdly high elasticities
+        if abs_elasticity > MAX_REPORTABLE_ELASTICITY:
+            raise ValueError(
+                f"Elasticity coefficient |{abs_elasticity:.2f}| is unrealistically high. "
+                f"This typically means: (1) price barely changed ({pct_change_price:.2f}%) while "
+                f"volume fluctuated significantly ({pct_change_quantity_abs:.2f}%), or "
+                f"(2) volume changes are driven by supply/liquidity factors, not demand response to price. "
+                f"The calculation cannot produce a meaningful result for this period."
+            )
+
+        # RELIABILITY CHECK: Flag moderately extreme values
         is_reliable = abs_elasticity <= MAX_REASONABLE_ELASTICITY
         reliability_note = None
         
         if not is_reliable:
             reliability_note = (
-                f"Elasticity coefficient |{abs_elasticity:.2f}| exceeds reasonable range (|{MAX_REASONABLE_ELASTICITY}|). "
-                f"This may indicate: (1) price variation too small ({pct_change_price:.2f}%), "
-                f"(2) volume changes driven by factors other than price, "
-                f"(3) insufficient data quality. Interpret with caution."
+                f"Elasticity |{abs_elasticity:.2f}| exceeds typical range (|{MAX_REASONABLE_ELASTICITY}|). "
+                f"Price variation: {pct_change_price:.2f}%, Volume variation: {pct_change_quantity_abs:.2f}%. "
+                f"In P2P markets, high 'elasticity' often reflects liquidity shocks or advertiser activity, "
+                f"not true demand response to price. Interpret with caution."
             )
             logger.warning(f"Unreliable elasticity: {reliability_note}")
 

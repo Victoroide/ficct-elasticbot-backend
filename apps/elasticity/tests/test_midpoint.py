@@ -158,7 +158,7 @@ class TestMidpointElasticityCalculator:
 
         Mathematical impossibility: division by zero in formula.
         """
-        with pytest.raises(ZeroDivisionError, match="Price change cannot be zero"):
+        with pytest.raises(ValueError, match="Price unchanged during period"):
             self.calculator.calculate(
                 quantity_initial=Decimal('1000'),
                 quantity_final=Decimal('900'),
@@ -280,3 +280,89 @@ class TestMidpointElasticityCalculator:
 
         assert result['abs_value'] < 0.95
         assert result['classification'] == 'inelastic'
+
+    # =========================================================================
+    # NEW VALIDATION TESTS - Reliability and threshold checks
+    # =========================================================================
+
+    def test_insufficient_price_variation_raises_error(self):
+        """
+        Price variation below 1% should fail.
+        
+        USDT/BOB is very stable; tiny price moves produce unreliable elasticity.
+        """
+        with pytest.raises(ValueError, match="Price variation too small"):
+            self.calculator.calculate(
+                quantity_initial=Decimal('100000'),
+                quantity_final=Decimal('80000'),  # 20% decrease
+                price_initial=Decimal('10.10'),
+                price_final=Decimal('10.12')  # Only 0.2% change
+            )
+
+    def test_extreme_elasticity_raises_error(self):
+        """
+        Elasticity > 20 should fail as unreportable.
+        
+        Such extreme values indicate data issues, not real demand behavior.
+        """
+        with pytest.raises(ValueError, match="unrealistically high"):
+            self.calculator.calculate(
+                quantity_initial=Decimal('100000'),
+                quantity_final=Decimal('50000'),  # 50% decrease
+                price_initial=Decimal('10.00'),
+                price_final=Decimal('10.15')  # 1.5% change -> Ed ≈ 33
+            )
+
+    def test_high_but_reportable_elasticity_flagged_unreliable(self):
+        """
+        Elasticity between 10 and 20 should compute but be flagged unreliable.
+        """
+        result = self.calculator.calculate(
+            quantity_initial=Decimal('100000'),
+            quantity_final=Decimal('70000'),  # 30% decrease
+            price_initial=Decimal('10.00'),
+            price_final=Decimal('10.25')  # 2.5% change -> Ed ≈ 12
+        )
+
+        assert result['elasticity'] is not None
+        assert result['abs_value'] > 10
+        assert result['abs_value'] < 20
+        assert result['is_reliable'] is False
+        assert result['reliability_note'] is not None
+        assert 'exceeds typical range' in result['reliability_note']
+
+    def test_normal_elasticity_is_reliable(self):
+        """
+        Normal elasticity values (|Ed| < 10) should be flagged as reliable.
+        """
+        result = self.calculator.calculate(
+            quantity_initial=Decimal('100000'),
+            quantity_final=Decimal('85000'),  # 15% decrease
+            price_initial=Decimal('10.00'),
+            price_final=Decimal('11.00')  # 10% increase -> Ed ≈ 1.5
+        )
+
+        assert result['abs_value'] < 10
+        assert result['is_reliable'] is True
+        assert result['reliability_note'] is None
+
+    def test_result_includes_metadata(self):
+        """Verify result contains all expected metadata fields."""
+        result = self.calculator.calculate(
+            quantity_initial=Decimal('1000'),
+            quantity_final=Decimal('900'),
+            price_initial=Decimal('100'),
+            price_final=Decimal('110')
+        )
+
+        # Check all expected fields
+        assert 'elasticity' in result
+        assert 'abs_value' in result
+        assert 'classification' in result
+        assert 'is_reliable' in result
+        assert 'reliability_note' in result
+        assert 'metadata' in result
+        assert 'price_initial' in result['metadata']
+        assert 'price_final' in result['metadata']
+        assert 'quantity_initial' in result['metadata']
+        assert 'quantity_final' in result['metadata']

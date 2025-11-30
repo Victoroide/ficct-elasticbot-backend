@@ -141,6 +141,18 @@ class ElasticityCalculation(models.Model):
         help_text="Average quality score of data points"
     )
 
+    # Reliability indicators
+    is_reliable = models.BooleanField(
+        default=True,
+        help_text="Whether the elasticity coefficient is trustworthy"
+    )
+
+    reliability_note = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Explanation if result is flagged as unreliable"
+    )
+
     # Error handling
     error_message = models.TextField(
         null=True,

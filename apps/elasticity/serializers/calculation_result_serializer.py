@@ -28,6 +28,7 @@ class CalculationResultSerializer(serializers.ModelSerializer):
     elasticity_magnitude = serializers.SerializerMethodField()
     confidence_interval_95 = serializers.SerializerMethodField()
     is_significant = serializers.SerializerMethodField()
+    classification_label = serializers.SerializerMethodField()
 
     class Meta:
         model = ElasticityCalculation
@@ -38,15 +39,23 @@ class CalculationResultSerializer(serializers.ModelSerializer):
             'start_date',
             'end_date',
             'window_size',
+            # Core results
             'elasticity_coefficient',
             'elasticity_magnitude',
             'classification',
+            'classification_label',
+            # Reliability (important for UI)
+            'is_reliable',
+            'reliability_note',
+            # Statistical metrics
             'confidence_interval_95',
             'r_squared',
             'standard_error',
+            'is_significant',
+            # Data quality
             'data_points_used',
             'average_data_quality',
-            'is_significant',
+            # Errors and metadata
             'error_message',
             'created_at',
             'completed_at',
@@ -77,6 +86,31 @@ class CalculationResultSerializer(serializers.ModelSerializer):
             upper = float(obj.confidence_interval_upper)
             return not (lower <= 0 <= upper)
         return None
+
+    def get_classification_label(self, obj):
+        """
+        Return human-readable Spanish classification with reliability caveat.
+        
+        The sign of elasticity coefficient indicates direction:
+        - Negative Ed: Normal demand (price up -> quantity down)
+        - Positive Ed: Giffen/Veblen goods or data artifact
+        """
+        if not obj.classification:
+            return None
+
+        # Base classification labels
+        labels = {
+            'ELASTIC': 'Demanda Elástica',
+            'INELASTIC': 'Demanda Inelástica',
+            'UNITARY': 'Elasticidad Unitaria',
+        }
+        base_label = labels.get(obj.classification, obj.classification)
+
+        # Add reliability warning if needed
+        if not obj.is_reliable:
+            return f"{base_label} (resultado no confiable)"
+        
+        return base_label
 
 
 class CalculationListSerializer(serializers.ModelSerializer):

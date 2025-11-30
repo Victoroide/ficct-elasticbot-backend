@@ -14,6 +14,7 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiExam
 from apps.market_data.models import MarketSnapshot, MacroeconomicIndicator
 from apps.market_data.serializers import MarketSnapshotSerializer, MacroeconomicIndicatorSerializer
 from apps.market_data.services import aggregation_service
+from apps.market_data.services.price_change_service import PriceChangeService
 from dateutil import parser as dateutil_parser
 
 
@@ -68,25 +69,61 @@ class SnapshotViewSet(viewsets.ReadOnlyModelViewSet):
 
     @extend_schema(
         tags=['Market Data'],
-        summary='Get latest snapshot',
-        description='Retrieve the most recent USDT/BOB market snapshot. '
-                    'Returns current market prices and trading volume.',
+        summary='Get latest snapshot with price changes',
+        description='Retrieve the most recent USDT/BOB market snapshot enriched with '
+                    'price change percentage vs previous snapshot and market premium '
+                    'vs BCB official exchange rate. Returns current market prices, '
+                    'trading volume, and calculated percentage changes for UI display.',
         responses={
-            200: MarketSnapshotSerializer,
+            200: {
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'string', 'format': 'uuid'},
+                    'timestamp': {'type': 'string', 'format': 'date-time'},
+                    'average_sell_price': {'type': 'number'},
+                    'average_buy_price': {'type': 'number'},
+                    'total_volume': {'type': 'number'},
+                    'spread_percentage': {'type': 'number'},
+                    'data_quality_score': {'type': 'number'},
+                    'price_change_percentage': {'type': 'number', 'nullable': True},
+                    'price_change_direction': {'type': 'string', 'enum': ['up', 'down', 'neutral']},
+                    'previous_price': {'type': 'number', 'nullable': True},
+                    'is_first_snapshot': {'type': 'boolean'},
+                    'time_gap_minutes': {'type': 'integer', 'nullable': True},
+                    'time_gap_warning': {'type': 'boolean'},
+                    'market_premium_percentage': {'type': 'number', 'nullable': True},
+                    'bcb_official_rate': {'type': 'number', 'nullable': True},
+                    'bcb_rate_date': {'type': 'string', 'format': 'date', 'nullable': True},
+                    'bcb_rate_updated_at': {'type': 'string', 'format': 'date-time', 'nullable': True},
+                    'bcb_rate_stale': {'type': 'boolean'},
+                },
+            },
             404: {'description': 'No market data available'},
         },
         examples=[
             OpenApiExample(
-                'Successful Response',
+                'Successful Response with Price Changes',
                 value={
-                    'id': 12345,
-                    'timestamp': '2025-11-27T20:00:00Z',
-                    'average_sell_price': '7.05',
-                    'average_buy_price': '6.98',
-                    'total_volume': '142500.50',
-                    'spread_percentage': '1.00',
-                    'num_active_traders': 23,
-                    'data_quality_score': '0.92',
+                    'id': '12345678-1234-1234-1234-123456789012',
+                    'timestamp': '2025-11-30T01:02:00+00:00',
+                    'average_sell_price': 10.09,
+                    'average_buy_price': 10.14,
+                    'total_volume': 175600.0,
+                    'spread_percentage': 0.46,
+                    'data_quality_score': 0.80,
+                    
+                    'price_change_percentage': 0.00,
+                    'price_change_direction': 'neutral',
+                    'previous_price': 10.09,
+                    'is_first_snapshot': False,
+                    'time_gap_minutes': 32,
+                    'time_gap_warning': False,
+                    
+                    'market_premium_percentage': 45.01,
+                    'bcb_official_rate': 6.96,
+                    'bcb_rate_date': '2025-11-29',
+                    'bcb_rate_updated_at': '2025-11-29T08:00:00+00:00',
+                    'bcb_rate_stale': False,
                 },
                 response_only=True,
             ),
@@ -95,10 +132,15 @@ class SnapshotViewSet(viewsets.ReadOnlyModelViewSet):
     @action(methods=['get'], detail=False, url_path='latest')
     def latest(self, request):
         """
-        Get most recent market snapshot.
+        Get most recent market snapshot with price changes and market premium.
 
         Returns:
-            Latest snapshot with current USDT/BOB prices
+            Latest snapshot enriched with:
+            - Price change percentage vs previous snapshot
+            - Market premium percentage vs BCB official rate
+            - Direction indicators for UI display
+            - Previous snapshot reference
+            - BCB rate information and staleness flags
         """
         snapshot = self.get_queryset().first()
 
@@ -108,8 +150,11 @@ class SnapshotViewSet(viewsets.ReadOnlyModelViewSet):
                 'detail': 'Please wait for data collection to complete'
             }, status=404)
 
-        serializer = self.get_serializer(snapshot)
-        return Response(serializer.data)
+        # Use price change service to enrich the data
+        service = PriceChangeService()
+        enriched_data = service.enrich_snapshot_data(snapshot)
+        
+        return Response(enriched_data)
 
     @extend_schema(
         tags=['Market Data'],
